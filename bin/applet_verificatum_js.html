@@ -1,0 +1,20 @@
+<HTML>
+<Head>
+</Head>
+<Title> Applet de prueba </Title>
+<Body>
+
+<Applet id="applet" Code="org.agora.verificatum.AppletVerificatum.class" archive="lib\verificatum.jar, lib\jgmpmee.jar" width="0" height="0">
+
+</Applet>
+
+<script>
+	var applet = document.getElementById('applet'); //Objeto del applet embebido en la pagina
+	var retorno= applet.encrypt('Hola prueba prueba');
+	document.write("<p>" + retorno + "</p>");
+</script>
+
+
+</Body>
+</HTML> 
+
