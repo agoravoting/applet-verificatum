@@ -20,16 +20,15 @@ import verificatum.crypto.PRG;
 import verificatum.crypto.PRGHeuristic;
 import verificatum.crypto.RandomSource;
 import verificatum.protocol.mixnet.MixNetElGamalInterface;
-//import verificatum.test.TestParameters;
-//import verificatum.crypto.*;
+
 public class AppletVerificatum extends Applet {
-	
-	/**
-	 * 
-	 */
-	private static final long serialVersionUID = -1423669527827145571L;
+
+    /**
+    *
+    */
+    private static final long serialVersionUID = -1423669527827145571L;
 //	private String parameter1;
-	//private LargeInteger prueba;
+    //private LargeInteger prueba;
 //	private boolean exito;
 	private String textoCifrado;
     protected static PGroup pGroup;
@@ -176,17 +175,4 @@ public class AppletVerificatum extends Applet {
     	return texto;
     }
     
-	/*   public void paint(java.awt.Graphics g)
-	   {
-	        //g.drawString("Applet de Verificatum .... Versión 0.0.1",50,25);
-	        //g.drawString("Parameter 1 is: " + parameter1,50,25);
-	        g.drawString("Texto encriptado: " + textoCifrado,50,50);
-	        g.drawLine(0, 0, 400, 0);
-	        g.drawLine(0, 100, 400, 100);
-	        g.drawLine(0, 0, 0, 100);
-	        g.drawLine(400, 0, 400, 100);
-	        
-	        System.out.println("LOG: Applet de Verificatum .... Versión 0.0.1");
-	    }
-	*/ 
 }
