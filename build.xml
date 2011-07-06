@@ -33,12 +33,15 @@
     <!-- Create the distribution directory -->
     <mkdir dir="${dist}/lib"/>
 
+
+    <mkdir dir="${build}/META-INF"/>
+
     <!-- Put everything in ${build} into a jar file -->
-    <jar jarfile="${dist}/lib/agora-applet.jar" basedir="${build}"/>
-    <manifest file="${build}/MANIFEST.MF">
-      <attribute name="Main-Class"
-        value="org.agora.VotingApplet"/>
-    </manifest>
+    <jar jarfile="${dist}/lib/agora-applet.jar" basedir="${build}">
+        <manifest>
+            <attribute name="Main-Class" value="org.agora.VotingApplet"/>
+        </manifest>
+    </jar>
   </target>
 
   <target name="clean"

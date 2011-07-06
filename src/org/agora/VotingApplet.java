@@ -268,13 +268,13 @@ public class VotingApplet extends Applet {
     }
 
     /**
-     * Test method to be able to execute java -jar agora-applet.jar for testing
-     * purposes
+     * Test method to be able to execute for testing purposses. Example:
+     *    java -jar agora-applet.jar "http://localhost:8080"
      */
-    public static void main(String[] args2) throws Exception {
+    public static void main(String[] args) throws Exception {
         VotingApplet applet = new VotingApplet();
-        String ballotStr = "00,000043334,00,000043335";
-        String hashes = applet.vote(ballotStr);
+        String ballotStr = "00,000043334,01,000043335";
+        String hashes = applet.vote(ballotStr, args[1]);
         System.out.println("vote result = " + hashes);
         System.exit(hashes != "FAIL" ? 0 : 1);
         return;
@@ -402,7 +402,6 @@ public class VotingApplet extends Applet {
             return "vote id = " + mVote + ", propossal id = " + mPropossal;
         }
     }
-
 
     public class PinDialog extends JDialog implements ActionListener {
         protected boolean mSuccess = false;
