@@ -69,7 +69,7 @@ import verificatum.protocol.mixnet.MixNetElGamalInterface;
 public class VotingApplet extends Applet {
     protected static final String interfaceName = "native";
     protected static final String publicKeyURLStr = "/publickey/voting/id/";
-    protected static final String sendBallotsURLStr = "/send/ballots";
+    protected static final String sendBallotsURLStr = "/send/ballots/";
     protected static final int certainty = 100;
     protected static final String confLinux=
         "name=OpenSC-OpenDNIe\nlibrary=/usr/lib/opensc-pkcs11.so\n";
@@ -148,6 +148,9 @@ public class VotingApplet extends Applet {
                 return;
             } catch (Exception e) {
                 // PIN failed trying again..
+                JOptionPane.showMessageDialog(VotingApplet.this,
+                    "Incorrect PIN, please enter your PIN and try again",
+                    "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
 
@@ -169,17 +172,21 @@ public class VotingApplet extends Applet {
     public String vote(String ballot, String baseUrl) {
         String ret = null;
         try {
+            System.out.println("1. initialize the applet");
             mBaseURLStr = baseUrl;
             // 1. initialize the applet
             initialize();
 
             // 2. Obtain the ballots
+            System.out.println("2. Obtain the ballots");
             Vote[] votes = parseBallotString(ballot);
 
             // 3. Send the ballots to the agora server
+            System.out.println("3. Send the ballots to the agora server");
             sendBallots(votes);
 
             // 4. create return value
+            System.out.println("4. create return value");
             String hashes = "";
             for (int i = 0; i < votes.length; i++) {
                 hashes = hashes + votes[i].getHash() + ",";
@@ -189,6 +196,7 @@ public class VotingApplet extends Applet {
 
             ret = hashes;
         } catch (Exception e) {
+            e.printStackTrace();
             ret = "FAIL";
         } finally {
             // close everything
@@ -229,6 +237,7 @@ public class VotingApplet extends Applet {
         }
 
         // 2. Send the request
+        System.out.println("Send the request");
         URL sendBallotsURL = new URL(mBaseURLStr + sendBallotsURLStr);
         HttpURLConnection con = (HttpURLConnection)sendBallotsURL.openConnection();
         con.setDoOutput(true);
@@ -237,6 +246,7 @@ public class VotingApplet extends Applet {
         wr.flush();
 
         // 3. Get the response
+        System.out.println("Get the response for data = " + data);
         BufferedReader rd = new BufferedReader(new InputStreamReader(con.getInputStream()));
         String response = "", line;
         while ((line = rd.readLine()) != null) {
@@ -245,10 +255,12 @@ public class VotingApplet extends Applet {
         wr.close();
         rd.close();
 
+        System.out.println("Process the response");
         // 4. Process the response
-        if (response == "SUCCESS") {
+        if (response.equals("SUCCESS")) {
             return;
         } else {
+            System.out.println("response = '" + response+ "' vs 'SUCCESS'");
             throw new Exception("There was a problem casting the ballot");
         }
     }
@@ -259,7 +271,7 @@ public class VotingApplet extends Applet {
     private Vote[] parseBallotString(String ballot) throws Exception {
         String[] items = ballot.split(",");
         Vote[] votes = new Vote[items.length/2];
-        for(int i = 0; i < items.length/2; i = i++) {
+        for(int i = 0; i < items.length/2; i++) {
             int vote = Integer.parseInt(items[i*2]);
             int propossal = Integer.parseInt(items[i*2 + 1]);
             votes[i] = new Vote(vote, propossal);
@@ -274,7 +286,7 @@ public class VotingApplet extends Applet {
     public static void main(String[] args) throws Exception {
         VotingApplet applet = new VotingApplet();
         String ballotStr = "00,000043334,01,000043335";
-        String hashes = applet.vote(ballotStr, args[1]);
+        String hashes = applet.vote(ballotStr, args[0]);
         System.out.println("vote result = " + hashes);
         System.exit(hashes != "FAIL" ? 0 : 1);
         return;
@@ -292,6 +304,7 @@ public class VotingApplet extends Applet {
         protected String mHash = null;
 
         public Vote(int vote, int propossal) throws Exception {
+            System.out.println("creating vote for " + vote + " and propossal " + propossal);
             mVote = vote;
             mPropossal = propossal;
 
@@ -361,9 +374,16 @@ public class VotingApplet extends Applet {
             // set ciphertext using the format of the interface.
             mEncryptedVote = mixnetInterface.ciphertextToString(ciphElements[0]);
 
-            // Calculate hash
+            // Calculate hash and convert it to hex String
             MessageDigest sha1 = MessageDigest.getInstance("SHA1");
-            mHash = new String(sha1.digest(mEncryptedVote.getBytes()));
+            String HEXES = "0123456789abcdef";
+            byte[] raw = sha1.digest(mEncryptedVote.getBytes());
+            StringBuilder hex = new StringBuilder(2 * raw.length);
+            for (byte b : raw) {
+                hex.append(HEXES.charAt((b & 0xF0) >> 4))
+                   .append(HEXES.charAt((b & 0x0F)));
+            }
+            mHash = hex.toString();
         }
 
         /**
@@ -438,6 +458,8 @@ public class VotingApplet extends Applet {
             contentPane.add(p, BorderLayout.PAGE_END);
                 pack();
 
+            setLocationRelativeTo(null);
+
             // Make it visible
             setVisible(true);
         }
@@ -448,20 +470,20 @@ public class VotingApplet extends Applet {
 
                 // Check that the pin is in valid format, i.e. 4 digits and
                 // nothing else
-                Pattern pattern = Pattern.compile("^\\d{4}$");
+                Pattern pattern = Pattern.compile("^.{8,16}$");
                 Matcher matcher = pattern.matcher(mPin);
                 if (!matcher.find()) {
                     mPin = null;
-                    JOptionPane.showMessageDialog(PinDialog.this, "Error",
-                    "Invalid PIN, please enter your 4 digits PIN and try again",
-                    JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(PinDialog.this, 
+                    "Invalid PIN, please enter your PIN and try again",
+                    "Error", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
                 mSuccess = true;
             } else {
-                JOptionPane.showMessageDialog(PinDialog.this, "Cancelled",
+                JOptionPane.showMessageDialog(PinDialog.this, 
                     "You cancelled to write the DNI-e PIN, voting cancelled",
-                    JOptionPane.ERROR_MESSAGE);
+                    "Cancelled", JOptionPane.ERROR_MESSAGE);
             }
             setVisible(false);
         }
@@ -474,6 +496,7 @@ public class VotingApplet extends Applet {
             if(!mSuccess) {
                 throw new Exception("User Cancelled the PIN Dialog");
             }
+            mPasswordField.setText("");
             return mPin;
         }
     }
