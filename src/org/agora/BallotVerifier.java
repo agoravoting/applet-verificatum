@@ -1,5 +1,12 @@
 package org.agora;
 
+import java.io.*;
+import java.net.*;
+import java.security.*;
+import java.security.cert.*;
+import java.util.*;
+import org.bouncycastle.ocsp.*;
+
 import java.util.Arrays;
 import java.util.Random;
 import java.applet.Applet;
@@ -48,6 +55,11 @@ import java.security.Signature;
 import java.security.MessageDigest;
 import java.util.Enumeration;
 import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import javax.security.auth.x500.X500Principal;
+import org.bouncycastle.ocsp.*;
+
+import org.apache.commons.codec.binary.Base64;
 
 import verificatum.arithm.ModPGroup;
 import verificatum.arithm.PGroup;
@@ -72,16 +84,29 @@ import verificatum.protocol.mixnet.MixNetElGamalInterface;
  */
 public class BallotVerifier {
     protected static final String interfaceName = "native";
+    protected static final String mCertCADir = "certs/";
+    protected static final int certainty = 100;
 
     protected RandomSource mRandomSource = null;
 
-    protected Certificate mCertificate = null;
+    protected X509Certificate mCertificate = null;
     protected PGroupElement[] mEncryptedVotes = null;
 
     protected String mSubjectCIF = null;
     protected String mSubjectName = null;
     protected String mSubjectSurname1 = null;
     protected String mSubjectSurname2 = null;
+
+    static String encode(byte[] bytes) throws Exception {
+        byte[] encoded = Base64.encodeBase64(bytes);
+        return new String(encoded, "ASCII");
+    }
+
+    static byte[] decode(String str) throws Exception {
+        byte[] bytes = str.getBytes("ASCII");
+        return Base64.decodeBase64(bytes);
+    }
+
     /**
      * Verifies a ballot. Verifications:
      * 1. Checks that the vote is correctly encrpyted with the correct public keys
@@ -100,7 +125,7 @@ public class BallotVerifier {
                 throw new Exception("Invalid input data");
             }
             deserializeCertificate(serializedCertificate);
-            checkVotesEncryption(votes);
+            checkVotesEncryption(votes, propossalPublicKeys);
             validateCertificate();
             checkSignatures(signatures);
             return mSubjectCIF + "," + mSubjectName + "," + mSubjectSurname1
@@ -116,24 +141,40 @@ public class BallotVerifier {
     protected void deserializeCertificate(String serializedCertificate)
         throws Exception
     {
-        byte[] pickled = serializedCertificate.getBytes();
-        InputStream in = new ByteArrayInputStream(pickled);
-        ObjectInputStream ois = new ObjectInputStream(in);
-        mCertificate = (Certificate)ois.readObject();
+        CertificateFactory factory = CertificateFactory.getInstance("X.509");
+        mCertificate = (X509Certificate)factory.generateCertificate(
+            new ByteArrayInputStream(decode(serializedCertificate)));
+        String subject = mCertificate.getSubjectX500Principal().toString();
+
+        // Example of subject:
+        // CN="DE LOS PALOTES MARIANOS, ANTONIO EDUARDO (FIRMA)", GIVENNAME=ANTONIO EDUARDO, SURNAME=DE LOS PALOTES, SERIALNUMBER=012345678D, C=ES
+
+        Pattern pattern = Pattern.compile("^CN=\"([^,]+), [^(]+ \\(FIRMA\\)\", GIVENNAME=([^,]+), SURNAME=([^,]+), SERIALNUMBER=(\\d{8}[A-Z]), C=ES$");
+        Matcher matcher = pattern.matcher(subject);
+        if (!matcher.find()) {
+            throw new Exception("Invalid Certificate subject: " +subject);
+        }
+
+        mSubjectCIF = matcher.group(4);
+        mSubjectName = matcher.group(2);
+        mSubjectSurname1 = matcher.group(3);
+        mSubjectSurname2 = matcher.group(1).substring(mSubjectSurname1.length());
     }
 
     /**
-     * Loads the vote string into PGroupElements. TODO: In the future, when we have
-     * our own Mixnet Interface, this interface will verify if the vote is
-     * valid using a random oracle proof embed in the ciphertext.
+     * Loads the vote string into PGroupElements. TODO: In the future,here we 
+     * will verify if the vote is valid using a random oracle ZKP of knowledge
+     * provided by the voter.
      */
-    protected void checkVotesEncryption(String[] votes) throws Exception {
+    protected void checkVotesEncryption(String[] votes, String[] propossalPublicKeys) throws Exception {
         mEncryptedVotes = new PGroupElement[votes.length];
         MixNetElGamalInterface mixnetInterface =
             MixNetElGamalInterface.getInterface(interfaceName);
         for (int i = 0; i < votes.length; i++) {
-            // TODO
-//             mEncryptedVotes[i] = mixnetInterface.stringToCiphertext(votes[i]);
+            PGroupElement publicKey = MixNetElGamalInterface.stringToPublicKey(
+                interfaceName, propossalPublicKeys[i], mRandomSource, certainty);
+            mEncryptedVotes[i] = mixnetInterface.stringToCiphertext(
+                publicKey.getPGroup(), votes[i]);
         }
     }
 
@@ -145,7 +186,58 @@ public class BallotVerifier {
      * 3. Check via OCSP that the certificate is not revoked.
      */
     protected void validateCertificate() throws Exception {
-        // TODO
+        // throws an exception if certificate is invalid (expired or not yet valid)
+        mCertificate.checkValidity();
+
+        Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+        OCSPReqGenerator ocspReqGen = new OCSPReqGenerator();
+        
+        String issuerCN = mCertificate.getIssuerX500Principal().getName("CANONICAL");
+        CertificateFactory cfIssuer = CertificateFactory.getInstance("X.509");
+        X509Certificate certCA = null;
+        if (issuerCN.contains("cn=ac dnie 001")) {
+            certCA = (X509Certificate) cfIssuer.generateCertificate(
+                new FileInputStream(mCertCADir + "ACDNIE001-SHA1.crt"));
+        } else if (issuerCN.contains("cn=ac dnie 002")) {
+            certCA = (X509Certificate) cfIssuer.generateCertificate(
+                new FileInputStream(mCertCADir + "ACDNIE002-SHA1.crt"));
+        } else if (issuerCN.contains("cn=ac dnie 003")) {
+            certCA = (X509Certificate) cfIssuer.generateCertificate(
+                new FileInputStream(mCertCADir + "ACDNIE003-SHA1.crt"));
+        } else {
+            throw new Exception("Invalid certCA");
+        }
+
+        CertificateID certid = new CertificateID(CertificateID.HASH_SHA1, certCA, mCertificate.getSerialNumber());
+        ocspReqGen.addRequest(certid);
+        OCSPReq ocspReq = ocspReqGen.generate();
+
+        URL url = new URL("http://ocsp.dnie.es");
+        HttpURLConnection con = (HttpURLConnection)url.openConnection();
+        con.setRequestProperty("Content-Type", "application/ocsp-request");
+        con.setRequestProperty("Accept", "application/ocsp-response");
+        con.setDoOutput(true);
+
+        OutputStream out = con.getOutputStream();
+        DataOutputStream dataOut = new DataOutputStream(new BufferedOutputStream(out));
+        dataOut.write(ocspReq.getEncoded());
+        dataOut.flush();
+        dataOut.close();
+
+        InputStream in = con.getInputStream();
+        BasicOCSPResp basicResp = (BasicOCSPResp)new OCSPResp(in).getResponseObject();
+        con.disconnect();
+        out.close();
+        in.close();
+
+        SingleResp singResp = basicResp.getResponses()[0];
+        Object status = singResp.getCertStatus();
+
+        if (status == null||
+            (status instanceof org.bouncycastle.ocsp.RevokedStatus) ||
+            (status instanceof org.bouncycastle.ocsp.UnknownStatus)) {
+            throw new Exception("invalid certificate");
+        }
     }
 
     protected void checkSignatures(String[] signatures) throws Exception {

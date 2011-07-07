@@ -17,6 +17,7 @@ import java.net.HttpURLConnection;
 import java.net.ProtocolException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.net.URLDecoder;
 import java.net.URLConnection;
 
 import java.util.regex.Matcher;
@@ -38,6 +39,8 @@ import java.awt.Frame;
 import java.awt.*;
 import java.awt.event.*;
 
+import org.apache.commons.codec.binary.Base64;
+
 import java.security.Key;
 import java.security.KeyStore;
 import java.security.PrivateKey;
@@ -47,6 +50,8 @@ import java.security.Signature;
 import java.security.MessageDigest;
 import java.util.Enumeration;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 
 import verificatum.arithm.ModPGroup;
 import verificatum.arithm.PGroup;
@@ -87,6 +92,16 @@ public class VotingApplet extends Applet {
     protected String mPin = null;
     protected String mBaseURLStr = null;
 
+    static String encode(byte[] bytes) throws Exception {
+        byte[] encoded = Base64.encodeBase64(bytes);
+        return new String(encoded, "ASCII");
+    }
+
+    static byte[] decode(String str) throws Exception {
+        byte[] bytes = str.getBytes("ASCII");
+        return Base64.decodeBase64(bytes);
+    }
+
     /**
      * Initialize the applet.
      */
@@ -124,6 +139,14 @@ public class VotingApplet extends Applet {
         if (mCertificate == null) {
             throw new Exception("Signature certificate not found");
         }
+        String subject = ((X509Certificate)mCertificate).getSubjectX500Principal().toString();
+        System.out.println("certsubject = '" + subject + "'");
+
+
+        String serializedCertificate = encode(mCertificate.getEncoded());
+        CertificateFactory factory = CertificateFactory.getInstance("X.509");
+        X509Certificate certificate = (X509Certificate)factory.generateCertificate(
+            new ByteArrayInputStream(decode(serializedCertificate)));
 
         Key key = mKeyStore.getKey(certAlias, mPin.toCharArray());
         if(!(key instanceof PrivateKey)) {
@@ -219,12 +242,7 @@ public class VotingApplet extends Applet {
         // 3. For each vote, the signature of the encrypted vote
 
         // Serialize the certificate
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ObjectOutputStream oos = new ObjectOutputStream(baos);
-        oos.writeObject(mCertificate);
-        oos.close();
-        String serializedCertificate = new String(baos.toByteArray(), "UTF-8");
-        baos.close();
+        String serializedCertificate = encode(mCertificate.getEncoded());
 
         // 1. Generate the POST data
         String data = URLEncoder.encode("dnie-certificate", "UTF-8") + "="
@@ -374,7 +392,7 @@ public class VotingApplet extends Applet {
             // set ciphertext using the format of the interface.
             mEncryptedVote = mixnetInterface.ciphertextToString(ciphElements[0]);
 
-            // Calculate hash and convert it to hex String
+            // Calculate hash and convert it to readable hex String
             MessageDigest sha1 = MessageDigest.getInstance("SHA1");
             String HEXES = "0123456789abcdef";
             byte[] raw = sha1.digest(mEncryptedVote.getBytes());
@@ -395,7 +413,7 @@ public class VotingApplet extends Applet {
             sig.update(mEncryptedVote.getBytes());
 
             /* firmamos los datos y retornamos el resultado */
-            mVoteSignature = new String(sig.sign());
+            mVoteSignature = encode(sig.sign());
         }
 
         public int getVote() {

@@ -8,6 +8,7 @@
   <property name="build" location="build"/>
   <property name="dist"  location="dist"/>
   <property name="depsdir" location="deps" />
+    <property name="certsdir" location="certs" />
 
   <target name="init">
     <!-- Create the time stamp -->
@@ -35,6 +36,10 @@
 
 
     <mkdir dir="${build}/META-INF"/>
+    <mkdir dir="${build}/certs/"/>
+    <copy file="${certsdir}/ACDNIE001-SHA1.crt" todir="${build}/certs/"/>
+    <copy file="${certsdir}/ACDNIE002-SHA1.crt" todir="${build}/certs/"/>
+    <copy file="${certsdir}/ACDNIE003-SHA1.crt" todir="${build}/certs/"/>
 
     <!-- Put everything in ${build} into a jar file -->
     <jar jarfile="${dist}/lib/agora-applet.jar" basedir="${build}">
