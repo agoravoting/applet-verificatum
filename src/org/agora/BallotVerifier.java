@@ -118,16 +118,15 @@ public class BallotVerifier {
      *         passed or "FAIL" otherwise. For example, a possible output is:
      *         "00000000F,Pepito,De Los Palotes,Marianos"
      */
-    public String verify(String serializedCertificate, String[] votes, String[] signatures, String[] propossalPublicKeys) {
+    public String verify(String serializedCertificate, String signature, String[] votes, String[] propossalPublicKeys) {
         try {
-            if (votes.length < 1 || votes.length != signatures.length ||
-                votes.length != propossalPublicKeys.length) {
+            if (votes.length < 1 || votes.length != propossalPublicKeys.length) {
                 throw new Exception("Invalid input data");
             }
             deserializeCertificate(serializedCertificate);
             checkVotesEncryption(votes, propossalPublicKeys);
             validateCertificate();
-            checkSignatures(signatures);
+            checkSignature(signature, votes);
             return mSubjectCIF + "," + mSubjectName + "," + mSubjectSurname1
                    + "," + mSubjectSurname2;
         } catch (Exception e) {
@@ -240,16 +239,16 @@ public class BallotVerifier {
         }
     }
 
-    protected void checkSignatures(String[] signatures) throws Exception {
-        // TODO
-        MessageDigest sha1 = MessageDigest.getInstance("SHA1");
-        for (int i = 0; i < signatures.length; i++) {
-            String hash = new String(sha1.digest(mEncryptedVotes[i].toByteArray()));
-            // decrypt signatures[i] into hash2
-            String hash2 = "";
-            if (hash != hash2) {
-                throw new Exception("Invalid signature");
-            }
+    protected void checkSignature(String signature, String[] votes) throws Exception {
+        Signature sig = Signature.getInstance("SHA1withRSA");
+        sig.initVerify(mCertificate);
+        ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
+        for (String vote : votes) {
+            concatenatedVotes.write(vote.getBytes());
+        }
+        sig.update(concatenatedVotes.toByteArray());
+        if(!sig.verify(decode(signature))) {
+            throw new Exception("Signature mismatch");
         }
     }
 
@@ -258,13 +257,13 @@ public class BallotVerifier {
     }
 
     /**
-     * Call for testing. args = cert vote1 sig1 pk1 [voten sign pkn ...]
+     * Call for testing. args = cert sig vote1 pk1 [voten pkn ...]
      */
     public static void main(String[] args) {
         BallotVerifier verifier = new BallotVerifier();
 
         // Check arguments
-        if (args.length < 5 || args.length % 3 != 2) {
+        if (args.length < 5 || args.length % 3 != 1) {
             System.out.println("Invalid arguments");
             System.exit(1);
             return;
@@ -273,23 +272,21 @@ public class BallotVerifier {
         // Parse arguments
         int numVotes = (args.length - 2) / 3;
         String serializedCertificate = args[1];
+        String signature = args[2];
         String[] votes = new String[numVotes];
-        String[] signatures = new String[numVotes];
         String[] propossalPublicKeys = new String[numVotes];
 
         for (int i = 0; i < numVotes; i++) {
-            votes[i] = args[2 + i*3];
+            votes[i] = args[3 + i*3];
         }
-        for (int i = 0; i < numVotes; i++) {
-            signatures[i] = args[3 + i*3];
-        }
+
         for (int i = 0; i < numVotes; i++) {
             propossalPublicKeys[i] = args[4 + i*3];
         }
 
         // Verify
-        String result = verifier.verify(serializedCertificate, votes,
-                                        signatures, propossalPublicKeys);
+        String result = verifier.verify(serializedCertificate, signature, votes,
+                                        propossalPublicKeys);
         System.out.println(result);
         System.exit(result != "FAIL" ? 0 : 1);
         return;

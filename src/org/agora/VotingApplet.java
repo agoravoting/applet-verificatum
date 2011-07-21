@@ -91,6 +91,7 @@ public class VotingApplet extends Applet {
     protected PrivateKey mPrivateKey = null;
     protected String mPin = null;
     protected String mBaseURLStr = null;
+    protected String mVotesSignature = null;
 
     static String encode(byte[] bytes) throws Exception {
         byte[] encoded = Base64.encodeBase64(bytes);
@@ -129,7 +130,7 @@ public class VotingApplet extends Applet {
         obtainPin();
 
         // Find signing cert in the cert list
-        Certificate mCertificate = null;
+        mCertificate = null;
         for (Enumeration<String> e = mKeyStore.aliases(); e.hasMoreElements();) {
             String alias =e.nextElement();
             if (alias.equals(certAlias)) {
@@ -204,6 +205,8 @@ public class VotingApplet extends Applet {
             System.out.println("2. Obtain the ballots");
             Vote[] votes = parseBallotString(ballot);
 
+            sign(votes);
+
             // 3. Send the ballots to the agora server
             System.out.println("3. Send the ballots to the agora server");
             sendBallots(votes);
@@ -233,6 +236,21 @@ public class VotingApplet extends Applet {
     }
 
     /**
+     * Joins the encrypted text of the votes and sign all of them together using
+     * the dnie. This way the user is only asked once to sign the votes.
+     */
+    protected void sign(Vote []votes) throws Exception {
+        Signature sig = Signature.getInstance("SHA1withRSA");
+        sig.initSign(mPrivateKey);
+        ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
+        for (Vote vote : votes) {
+            concatenatedVotes.write(vote.getEncryptedVote().getBytes());
+        }
+        sig.update(concatenatedVotes.toByteArray());
+        mVotesSignature = encode(sig.sign());
+    }
+
+    /**
      * Sends the ballots to the agora server. Throws an exception if it fails.
      */
     protected void sendBallots(Vote []votes) throws Exception {
@@ -247,11 +265,11 @@ public class VotingApplet extends Applet {
         // 1. Generate the POST data
         String data = URLEncoder.encode("dnie-certificate", "UTF-8") + "="
                     + URLEncoder.encode(serializedCertificate, "UTF-8");
+        data += "&" + URLEncoder.encode("votes-signature", "UTF-8") + "="
+                + URLEncoder.encode(mVotesSignature, "UTF-8");
         for (int i = 0; i < votes.length; i++) {
             data += "&" + URLEncoder.encode("encrypted-vote" + i, "UTF-8") + "="
                  + URLEncoder.encode(votes[i].getEncryptedVote(), "UTF-8");
-            data += "&" + URLEncoder.encode("vote-signature" + i, "UTF-8") + "="
-                 + URLEncoder.encode(votes[i].getVoteSignature(), "UTF-8");
         }
 
         // 2. Send the request
@@ -299,7 +317,11 @@ public class VotingApplet extends Applet {
 
     /**
      * Test method to be able to execute for testing purposses. Example:
-     *    java -jar agora-applet.jar "http://localhost:8080"
+     *    java -classpath deps/apache-commons-codec-1.4.jar:\
+     *              deps/bcprov-1.45.jar:deps/verificatum.jar:\
+     *              dist/lib/agora-applet.jar \
+     *          org.Agora.VotingApplet \
+     *          "http://localhost:8000"
      */
     public static void main(String[] args) throws Exception {
         VotingApplet applet = new VotingApplet();
@@ -318,7 +340,6 @@ public class VotingApplet extends Applet {
         protected int mPropossal = -1;
         protected PGroupElement mFullPublicKey = null;
         protected String mEncryptedVote = null;
-        protected String mVoteSignature = null;
         protected String mHash = null;
 
         public Vote(int vote, int propossal) throws Exception {
@@ -328,7 +349,6 @@ public class VotingApplet extends Applet {
 
             obtainPublicKey();
             encrypt();
-            sign();
         }
 
         // Obtain the public key for this propossal/voting
@@ -404,18 +424,6 @@ public class VotingApplet extends Applet {
             mHash = hex.toString();
         }
 
-        /**
-         * Signs the vote with the user's dnie
-         */
-        protected void sign() throws Exception {
-            Signature sig = Signature.getInstance("SHA1withRSA");
-            sig.initSign(mPrivateKey);
-            sig.update(mEncryptedVote.getBytes());
-
-            /* firmamos los datos y retornamos el resultado */
-            mVoteSignature = encode(sig.sign());
-        }
-
         public int getVote() {
             return mVote;
         }
@@ -426,10 +434,6 @@ public class VotingApplet extends Applet {
 
         public String getEncryptedVote() {
             return mEncryptedVote;
-        }
-
-        public String getVoteSignature() {
-            return mVoteSignature;
         }
 
         public String getHash() {
