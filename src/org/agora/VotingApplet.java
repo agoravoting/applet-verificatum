@@ -73,8 +73,8 @@ import verificatum.protocol.mixnet.MixNetElGamalInterface;
 
 public class VotingApplet extends Applet {
     protected static final String interfaceName = "native";
-    protected static final String publicKeyURLStr = "/publickey/voting/id/";
-    protected static final String sendBallotsURLStr = "/send/ballots/";
+    protected static final String publicKeyURLStr = "/votings/";
+    protected static final String sendBallotsURLStr = "/votes";
     protected static final int certainty = 100;
     protected static final String confLinux=
         "name=OpenSC-OpenDNIe\nlibrary=/usr/lib/opensc-pkcs11.so\n";
@@ -133,6 +133,7 @@ public class VotingApplet extends Applet {
         mCertificate = null;
         for (Enumeration<String> e = mKeyStore.aliases(); e.hasMoreElements();) {
             String alias =e.nextElement();
+            System.out.println("alias = " + alias);
             if (alias.equals(certAlias)) {
                 mCertificate = mKeyStore.getCertificate(alias);
             }
@@ -248,6 +249,13 @@ public class VotingApplet extends Applet {
         }
         sig.update(concatenatedVotes.toByteArray());
         mVotesSignature = encode(sig.sign());
+
+        Signature sig2 = Signature.getInstance("SHA1withRSA");
+        CertificateFactory factory = CertificateFactory.getInstance("X.509");
+        X509Certificate  certificate = (X509Certificate)factory.generateCertificate(
+            new ByteArrayInputStream(mCertificate.getEncoded()));
+        sig2.initVerify(mCertificate.getPublicKey());
+        sig2.initVerify(certificate.getPublicKey());
     }
 
     /**
@@ -263,13 +271,15 @@ public class VotingApplet extends Applet {
         String serializedCertificate = encode(mCertificate.getEncoded());
 
         // 1. Generate the POST data
-        String data = URLEncoder.encode("dnie-certificate", "UTF-8") + "="
+        String data = URLEncoder.encode("dnie_certificate", "UTF-8") + "="
                     + URLEncoder.encode(serializedCertificate, "UTF-8");
-        data += "&" + URLEncoder.encode("votes-signature", "UTF-8") + "="
+        data += "&" + URLEncoder.encode("votes_signature", "UTF-8") + "="
                 + URLEncoder.encode(mVotesSignature, "UTF-8");
-        for (int i = 0; i < votes.length; i++) {
-            data += "&" + URLEncoder.encode("encrypted-vote" + i, "UTF-8") + "="
-                 + URLEncoder.encode(votes[i].getEncryptedVote(), "UTF-8");
+        for (Vote vote : votes) {
+            data += "&" + URLEncoder.encode("voting_id[]", "UTF-8") + "="
+                 + URLEncoder.encode(vote.getPropossal()+"", "UTF-8");
+            data += "&" + URLEncoder.encode("encrypted_vote[]", "UTF-8") + "="
+                 + URLEncoder.encode(vote.getEncryptedVote(), "UTF-8");
         }
 
         // 2. Send the request
@@ -283,20 +293,15 @@ public class VotingApplet extends Applet {
 
         // 3. Get the response
         System.out.println("Get the response for data = " + data);
-        BufferedReader rd = new BufferedReader(new InputStreamReader(con.getInputStream()));
-        String response = "", line;
-        while ((line = rd.readLine()) != null) {
-            response += line;
-        }
         wr.close();
-        rd.close();
 
         System.out.println("Process the response");
         // 4. Process the response
-        if (response.equals("SUCCESS")) {
+        if (con.getResponseCode() == HttpURLConnection.HTTP_OK) {
             return;
         } else {
-            System.out.println("response = '" + response+ "' vs 'SUCCESS'");
+            System.out.println("response code = '" + con.getResponseCode() + "' vs '" +
+                HttpURLConnection.HTTP_OK + "'");
             throw new Exception("There was a problem casting the ballot");
         }
     }
@@ -325,7 +330,7 @@ public class VotingApplet extends Applet {
      */
     public static void main(String[] args) throws Exception {
         VotingApplet applet = new VotingApplet();
-        String ballotStr = "00,000043334,01,000043335";
+        String ballotStr = "0,1,01,1";
         String hashes = applet.vote(ballotStr, args[0]);
         System.out.println("vote result = " + hashes);
         System.exit(hashes != "FAIL" ? 0 : 1);
@@ -362,6 +367,7 @@ public class VotingApplet extends Applet {
                 publicKeyString += line;
             }
             rd.close();
+            System.out.println("publicKeyString = '" + publicKeyString + "'");
             mFullPublicKey = MixNetElGamalInterface.stringToPublicKey(
                 interfaceName, publicKeyString, mRandomSource, certainty);
         }

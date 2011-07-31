@@ -84,7 +84,6 @@ import verificatum.protocol.mixnet.MixNetElGamalInterface;
  */
 public class BallotVerifier {
     protected static final String interfaceName = "native";
-    protected static final String mCertCADir = "certs/";
     protected static final int certainty = 100;
 
     protected RandomSource mRandomSource = null;
@@ -112,7 +111,7 @@ public class BallotVerifier {
      * 1. Checks that the vote is correctly encrpyted with the correct public keys
      * 2. Checks that the given dni-e certificate is valid and not revoked
      * 3. Check that the votes are signed with the given certificate
-     * 4. Obtains user information from the certificate andreturns it
+     * 4. Obtains user information from the certificate and returns it
      *
      * @return "CIF (with number),Name,Surname1,Surname2" if all verifications
      *         passed or "FAIL" otherwise. For example, a possible output is:
@@ -120,6 +119,7 @@ public class BallotVerifier {
      */
     public String verify(String serializedCertificate, String signature, String[] votes, String[] propossalPublicKeys) {
         try {
+            init();
             if (votes.length < 1 || votes.length != propossalPublicKeys.length) {
                 throw new Exception("Invalid input data");
             }
@@ -130,6 +130,7 @@ public class BallotVerifier {
             return mSubjectCIF + "," + mSubjectName + "," + mSubjectSurname1
                    + "," + mSubjectSurname2;
         } catch (Exception e) {
+            e.printStackTrace();
             return "FAIL";
         }
     }
@@ -170,6 +171,7 @@ public class BallotVerifier {
         MixNetElGamalInterface mixnetInterface =
             MixNetElGamalInterface.getInterface(interfaceName);
         for (int i = 0; i < votes.length; i++) {
+            System.out.println("public key = " + propossalPublicKeys[i]);
             PGroupElement publicKey = MixNetElGamalInterface.stringToPublicKey(
                 interfaceName, propossalPublicKeys[i], mRandomSource, certainty);
             mEncryptedVotes[i] = mixnetInterface.stringToCiphertext(
@@ -194,15 +196,19 @@ public class BallotVerifier {
         String issuerCN = mCertificate.getIssuerX500Principal().getName("CANONICAL");
         CertificateFactory cfIssuer = CertificateFactory.getInstance("X.509");
         X509Certificate certCA = null;
+        ClassLoader classLoader = getClass().getClassLoader();
         if (issuerCN.contains("cn=ac dnie 001")) {
             certCA = (X509Certificate) cfIssuer.generateCertificate(
-                new FileInputStream(mCertCADir + "ACDNIE001-SHA1.crt"));
+                new VirtualFileInputStream(classLoader.getResourceAsStream(
+                    "certs/ACDNIE001-SHA1.crt")));
         } else if (issuerCN.contains("cn=ac dnie 002")) {
             certCA = (X509Certificate) cfIssuer.generateCertificate(
-                new FileInputStream(mCertCADir + "ACDNIE002-SHA1.crt"));
+                new VirtualFileInputStream(classLoader.getResourceAsStream(
+                    "certs/ACDNIE002-SHA1.crt")));
         } else if (issuerCN.contains("cn=ac dnie 003")) {
             certCA = (X509Certificate) cfIssuer.generateCertificate(
-                new FileInputStream(mCertCADir + "ACDNIE003-SHA1.crt"));
+                new VirtualFileInputStream(classLoader.getResourceAsStream(
+                    "certs/ACDNIE003-SHA1.crt")));
         } else {
             throw new Exception("Invalid certCA");
         }
@@ -232,16 +238,15 @@ public class BallotVerifier {
         SingleResp singResp = basicResp.getResponses()[0];
         Object status = singResp.getCertStatus();
 
-        if (status == null||
-            (status instanceof org.bouncycastle.ocsp.RevokedStatus) ||
-            (status instanceof org.bouncycastle.ocsp.UnknownStatus)) {
-            throw new Exception("invalid certificate");
+        // status being null indicates it's good!
+        if (status != null) {
+            throw new Exception("invalid certificate, status = " + status);
         }
     }
 
     protected void checkSignature(String signature, String[] votes) throws Exception {
         Signature sig = Signature.getInstance("SHA1withRSA");
-        sig.initVerify(mCertificate);
+        sig.initVerify(mCertificate.getPublicKey());
         ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
         for (String vote : votes) {
             concatenatedVotes.write(vote.getBytes());
@@ -263,25 +268,25 @@ public class BallotVerifier {
         BallotVerifier verifier = new BallotVerifier();
 
         // Check arguments
-        if (args.length < 5 || args.length % 3 != 1) {
+        if (args.length < 4 || args.length % 2 != 0) {
             System.out.println("Invalid arguments");
             System.exit(1);
             return;
         }
 
         // Parse arguments
-        int numVotes = (args.length - 2) / 3;
-        String serializedCertificate = args[1];
-        String signature = args[2];
+        int numVotes = (args.length - 2) / 2;
+        String serializedCertificate = args[0];
+        String signature = args[1];
         String[] votes = new String[numVotes];
         String[] propossalPublicKeys = new String[numVotes];
 
         for (int i = 0; i < numVotes; i++) {
-            votes[i] = args[3 + i*3];
+            votes[i] = args[2 + i*2];
         }
 
         for (int i = 0; i < numVotes; i++) {
-            propossalPublicKeys[i] = args[4 + i*3];
+            propossalPublicKeys[i] = args[3 + i*2];
         }
 
         // Verify
