@@ -53,6 +53,7 @@ import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 
+import verificatum.eio.ByteTree;
 import verificatum.arithm.ModPGroup;
 import verificatum.arithm.PGroup;
 import verificatum.arithm.PGroupElement;
@@ -60,6 +61,8 @@ import verificatum.arithm.PGroupElementArray;
 import verificatum.arithm.PPGroup;
 import verificatum.arithm.PPGroupElement;
 import verificatum.arithm.PRing;
+import verificatum.arithm.PFieldElement;
+import verificatum.arithm.PRingElement;
 import verificatum.arithm.PRingElementArray;
 import verificatum.crypto.CryptoKeyGen;
 import verificatum.crypto.CryptoKeyGenCramerShoup;
@@ -280,6 +283,12 @@ public class VotingApplet extends Applet {
                  + URLEncoder.encode(vote.getPropossal()+"", "UTF-8");
             data += "&" + URLEncoder.encode("encrypted_vote[]", "UTF-8") + "="
                  + URLEncoder.encode(vote.getEncryptedVote(), "UTF-8");
+            data += "&" + URLEncoder.encode("a_factor[]", "UTF-8") + "="
+                 + URLEncoder.encode(vote.getAFactor(), "UTF-8");
+            data += "&" + URLEncoder.encode("d_factor[]", "UTF-8") + "="
+                 + URLEncoder.encode(vote.getDFactor(), "UTF-8");
+            data += "&" + URLEncoder.encode("u_factor[]", "UTF-8") + "="
+                 + URLEncoder.encode(vote.getUFactor(), "UTF-8");
         }
 
         // 2. Send the request
@@ -344,8 +353,12 @@ public class VotingApplet extends Applet {
         protected int mVote = -1;
         protected int mPropossal = -1;
         protected PGroupElement mFullPublicKey = null;
+        protected String mFullPublicKeyString = null;
         protected String mEncryptedVote = null;
         protected String mHash = null;
+        protected String mAFactor = null;
+        protected String mDFactor = null;
+        protected String mUFactor = null;
 
         public Vote(int vote, int propossal) throws Exception {
             System.out.println("creating vote for " + vote + " and propossal " + propossal);
@@ -368,6 +381,7 @@ public class VotingApplet extends Applet {
             }
             rd.close();
             System.out.println("publicKeyString = '" + publicKeyString + "'");
+            mFullPublicKeyString = publicKeyString;
             mFullPublicKey = MixNetElGamalInterface.stringToPublicKey(
                 interfaceName, publicKeyString, mRandomSource, certainty);
         }
@@ -428,6 +442,40 @@ public class VotingApplet extends Applet {
                    .append(HEXES.charAt((b & 0x0F)));
             }
             mHash = hex.toString();
+
+
+            // Create a verifiable proof of knowledge of the cleartext
+            PRingElementArray s =
+                randomizerPRing.randomElementArray(1, prg, 20);
+            PGroupElementArray a = basicPublicKey.exp(s);
+            // c = hash(prefix, g, u*v, a)
+            String prefix =  Integer.toString(mPropossal);
+            String g = mFullPublicKeyString;
+            String uv = mEncryptedVote;
+            String aStr = encode(a.get(0).toByteTree().toByteArray());
+            String factorsStr = prefix + g + uv + aStr;
+            byte[] cHash = sha1.digest(factorsStr.getBytes());
+            // d = cr+s
+            prg.setSeed(cHash);
+            PRingElement c =
+                randomizerPRing.randomElementArray(1, prg, 20).get(0);
+            PRingElement d = c.mul(r.get(0)).add(s.get(0));
+
+            mAFactor = aStr;
+            mDFactor = encode(d.toByteArray());
+            mUFactor = encode(u.get(0).toByteTree().toByteArray());
+        }
+
+        public String getAFactor() {
+            return mAFactor;
+        }
+
+        public String getDFactor() {
+            return mDFactor;
+        }
+
+        public String getUFactor() {
+            return mUFactor;
         }
 
         public int getVote() {

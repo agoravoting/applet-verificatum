@@ -61,13 +61,17 @@ import org.bouncycastle.ocsp.*;
 
 import org.apache.commons.codec.binary.Base64;
 
+import verificatum.eio.ByteTree;
+import verificatum.eio.ByteTreeReader;
 import verificatum.arithm.ModPGroup;
+import verificatum.arithm.LargeInteger;
 import verificatum.arithm.PGroup;
 import verificatum.arithm.PGroupElement;
 import verificatum.arithm.PGroupElementArray;
 import verificatum.arithm.PPGroup;
 import verificatum.arithm.PPGroupElement;
 import verificatum.arithm.PRing;
+import verificatum.arithm.PRingElement;
 import verificatum.arithm.PRingElementArray;
 import verificatum.crypto.CryptoKeyGen;
 import verificatum.crypto.CryptoKeyGenCramerShoup;
@@ -117,14 +121,17 @@ public class BallotVerifier {
      *         passed or "FAIL" otherwise. For example, a possible output is:
      *         "00000000F,Pepito,De Los Palotes,Marianos"
      */
-    public String verify(String serializedCertificate, String signature, String[] votes, String[] propossalPublicKeys) {
+    public String verify(String serializedCertificate, String signature,
+        String[] votes, String[] propossalPublicKeys, String[] propossalIds,
+        String[] aFactors, String[] dFactors, String[] uFactors) {
         try {
             init();
             if (votes.length < 1 || votes.length != propossalPublicKeys.length) {
                 throw new Exception("Invalid input data");
             }
             deserializeCertificate(serializedCertificate);
-            checkVotesEncryption(votes, propossalPublicKeys);
+            checkVotesEncryption(votes, propossalPublicKeys, propossalIds,
+                aFactors, dFactors, uFactors);
             validateCertificate();
             checkSignature(signature, votes);
             return mSubjectCIF + "," + mSubjectName + "," + mSubjectSurname1
@@ -166,17 +173,65 @@ public class BallotVerifier {
      * will verify if the vote is valid using a random oracle ZKP of knowledge
      * provided by the voter.
      */
-    protected void checkVotesEncryption(String[] votes, String[] propossalPublicKeys) throws Exception {
+    protected void checkVotesEncryption(String[] votes,
+        String[] propossalPublicKeys, String[] propossalIds,
+        String[] aFactors, String[] dFactors, String[] uFactors
+    )
+        throws Exception
+    {
         mEncryptedVotes = new PGroupElement[votes.length];
         MixNetElGamalInterface mixnetInterface =
             MixNetElGamalInterface.getInterface(interfaceName);
+        MessageDigest sha1 = MessageDigest.getInstance("SHA1");
+        PRG prg = new PRGHeuristic();
+
         for (int i = 0; i < votes.length; i++) {
-            System.out.println("public key = " + propossalPublicKeys[i]);
-            PGroupElement publicKey = MixNetElGamalInterface.stringToPublicKey(
+            // 1. Test that the ciphertext load correctly into memory
+            PGroupElement fullPublicKey = MixNetElGamalInterface.stringToPublicKey(
                 interfaceName, propossalPublicKeys[i], mRandomSource, certainty);
             mEncryptedVotes[i] = mixnetInterface.stringToCiphertext(
-                publicKey.getPGroup(), votes[i]);
+                fullPublicKey.getPGroup(), votes[i]);
+
+            // 2. Test the proof of knowledge of the plaintext
+            // Recover key from input
+            PGroupElement basicPublicKey =
+                ((PPGroupElement)fullPublicKey).project(0);
+            PGroupElement publicKey =
+                ((PPGroupElement)fullPublicKey).project(1);
+
+            PGroup basicPublicKeyPGroup = basicPublicKey.getPGroup();
+            PGroup publicKeyPGroup = publicKey.getPGroup();
+            PRing randomizerPRing = basicPublicKeyPGroup.getPRing();
+
+            // c = hash(prefix, g, u*v, a)
+            String prefix =  propossalIds[i];
+            String g = propossalPublicKeys[i];
+            String uv = votes[i];
+            String aStr = aFactors[i];
+            String factorsStr = prefix + g + uv + aStr;
+            byte[] cHash = sha1.digest(factorsStr.getBytes());
+            prg.setSeed(cHash);
+            PRingElement c =
+                randomizerPRing.randomElementArray(1, prg, 20).get(0);
+
+            ByteTree bt = new ByteTree(decode(aFactors[i]), null);
+            ByteTreeReader btr = bt.getByteTreeReader();
+            PGroupElement aFactor = fullPublicKey.getPGroup().toElement(btr);
+
+            bt = new ByteTree(decode(uFactors[i]), null);
+            btr = bt.getByteTreeReader();
+            PGroupElement uFactor = fullPublicKey.getPGroup().toElement(btr);
+
+            byte[] bytes = decode(dFactors[i]);
+            PRingElement dFactor = randomizerPRing.toElement(bytes, 0, bytes.length);
+
+            // check that u^c * a = g^d
+            if (!uFactor.exp(c).mul(aFactor).equals(basicPublicKey.exp(dFactor))) {
+                throw new Exception("Invalid proof of knowledge for the plaintext for vote i = " + i);
+            }
         }
+
+        
     }
 
     /**
@@ -262,36 +317,57 @@ public class BallotVerifier {
     }
 
     /**
-     * Call for testing. args = cert sig vote1 pk1 [voten pkn ...]
+     * Call for testing. args = cert sig vote1 pk1 votingid1 afactor1 dfactor1 ufactor1
+     * [voten pkn votingidn afactorn dfactorn ufactorn...]
      */
     public static void main(String[] args) {
         BallotVerifier verifier = new BallotVerifier();
 
         // Check arguments
-        if (args.length < 4 || args.length % 2 != 0) {
+        if (args.length < 8 || args.length % 6 != 2) {
             System.out.println("Invalid arguments");
             System.exit(1);
             return;
         }
 
         // Parse arguments
-        int numVotes = (args.length - 2) / 2;
+        int numVotes = (args.length - 2) / 6;
         String serializedCertificate = args[0];
         String signature = args[1];
         String[] votes = new String[numVotes];
         String[] propossalPublicKeys = new String[numVotes];
+        String[] propossalIds = new String[numVotes];
+        String[] aFactors = new String[numVotes];
+        String[] dFactors = new String[numVotes];
+        String[] uFactors = new String[numVotes];
 
         for (int i = 0; i < numVotes; i++) {
-            votes[i] = args[2 + i*2];
+            votes[i] = args[2 + i*6];
         }
 
         for (int i = 0; i < numVotes; i++) {
-            propossalPublicKeys[i] = args[3 + i*2];
+            propossalPublicKeys[i] = args[3 + i*6];
+        }
+
+        for (int i = 0; i < numVotes; i++) {
+            propossalIds[i] = args[4 + i*6];
+        }
+
+        for (int i = 0; i < numVotes; i++) {
+            aFactors[i] = args[5 + i*6];
+        }
+
+        for (int i = 0; i < numVotes; i++) {
+            dFactors[i] = args[6 + i*6];
+        }
+
+        for (int i = 0; i < numVotes; i++) {
+            uFactors[i] = args[7 + i*6];
         }
 
         // Verify
         String result = verifier.verify(serializedCertificate, signature, votes,
-                                        propossalPublicKeys);
+            propossalPublicKeys, propossalIds, aFactors, dFactors, uFactors);
         System.out.println(result);
         System.exit(result != "FAIL" ? 0 : 1);
         return;
