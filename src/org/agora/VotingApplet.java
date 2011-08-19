@@ -54,6 +54,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 
 import verificatum.eio.ByteTree;
+import verificatum.eio.ByteTreeReader;
 import verificatum.arithm.ModPGroup;
 import verificatum.arithm.PGroup;
 import verificatum.arithm.PGroupElement;
@@ -169,8 +170,9 @@ public class VotingApplet extends Applet {
         // throw an Exception
 
         for (int i = 0; i < 3; i++) {
-            PinDialog dialog = new PinDialog();
-            mPin = dialog.getPin();
+//             PinDialog dialog = new PinDialog();
+//             mPin = dialog.getPin();
+            mPin = "Qwtt4f=0";
             try {
                 mKeyStore.load(null, mPin.toCharArray());
                 return;
@@ -274,7 +276,7 @@ public class VotingApplet extends Applet {
         String serializedCertificate = encode(mCertificate.getEncoded());
 
         // 1. Generate the POST data
-        String data = URLEncoder.encode("dnie_certificate", "UTF-8") + "="
+        String data = URLEncoder.encode("dnie_certificate" + "a", "UTF-8") + "="
                     + URLEncoder.encode(serializedCertificate, "UTF-8");
         data += "&" + URLEncoder.encode("votes_signature", "UTF-8") + "="
                 + URLEncoder.encode(mVotesSignature, "UTF-8");
@@ -462,7 +464,7 @@ public class VotingApplet extends Applet {
             PRingElement d = c.mul(r.get(0)).add(s.get(0));
 
             mAFactor = aStr;
-            mDFactor = encode(d.toByteArray());
+            mDFactor = encode(d.toByteTree().toByteArray());
             mUFactor = encode(u.get(0).toByteTree().toByteArray());
         }
 

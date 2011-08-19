@@ -137,7 +137,6 @@ public class BallotVerifier {
             return mSubjectCIF + "," + mSubjectName + "," + mSubjectSurname1
                    + "," + mSubjectSurname2;
         } catch (Exception e) {
-            e.printStackTrace();
             return "FAIL";
         }
     }
@@ -216,14 +215,14 @@ public class BallotVerifier {
 
             ByteTree bt = new ByteTree(decode(aFactors[i]), null);
             ByteTreeReader btr = bt.getByteTreeReader();
-            PGroupElement aFactor = fullPublicKey.getPGroup().toElement(btr);
+            PGroupElement aFactor = basicPublicKey.getPGroup().toElement(btr);
 
             bt = new ByteTree(decode(uFactors[i]), null);
             btr = bt.getByteTreeReader();
-            PGroupElement uFactor = fullPublicKey.getPGroup().toElement(btr);
+            PGroupElement uFactor = basicPublicKey.getPGroup().toElement(btr);
 
-            byte[] bytes = decode(dFactors[i]);
-            PRingElement dFactor = randomizerPRing.toElement(bytes, 0, bytes.length);
+            bt = new ByteTree(decode(dFactors[i]), null);
+            PRingElement dFactor = randomizerPRing.toElement(bt.getByteTreeReader());
 
             // check that u^c * a = g^d
             if (!uFactor.exp(c).mul(aFactor).equals(basicPublicKey.exp(dFactor))) {
@@ -325,7 +324,7 @@ public class BallotVerifier {
 
         // Check arguments
         if (args.length < 8 || args.length % 6 != 2) {
-            System.out.println("Invalid arguments");
+            System.out.println("FAIL");
             System.exit(1);
             return;
         }
