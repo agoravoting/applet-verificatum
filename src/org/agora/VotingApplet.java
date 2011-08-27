@@ -1,7 +1,6 @@
 package org.agora;
 
 import java.util.Arrays;
-import java.util.Random; 
 import java.applet.Applet;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -54,6 +53,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 
 import verificatum.eio.ByteTree;
+import verificatum.eio.ByteTreeBasic;
 import verificatum.eio.ByteTreeReader;
 import verificatum.arithm.ModPGroup;
 import verificatum.arithm.PGroup;
@@ -65,6 +65,7 @@ import verificatum.arithm.PRing;
 import verificatum.arithm.PFieldElement;
 import verificatum.arithm.PRingElement;
 import verificatum.arithm.PRingElementArray;
+import verificatum.crypto.RandomOracle;
 import verificatum.crypto.CryptoKeyGen;
 import verificatum.crypto.CryptoKeyGenCramerShoup;
 import verificatum.crypto.CryptoKeyPair;
@@ -170,9 +171,8 @@ public class VotingApplet extends Applet {
         // throw an Exception
 
         for (int i = 0; i < 3; i++) {
-//             PinDialog dialog = new PinDialog();
-//             mPin = dialog.getPin();
-            mPin = "Qwtt4f=0";
+            PinDialog dialog = new PinDialog();
+            mPin = dialog.getPin();
             try {
                 mKeyStore.load(null, mPin.toCharArray());
                 return;
@@ -276,7 +276,7 @@ public class VotingApplet extends Applet {
         String serializedCertificate = encode(mCertificate.getEncoded());
 
         // 1. Generate the POST data
-        String data = URLEncoder.encode("dnie_certificate" + "a", "UTF-8") + "="
+        String data = URLEncoder.encode("dnie_certificate", "UTF-8") + "="
                     + URLEncoder.encode(serializedCertificate, "UTF-8");
         data += "&" + URLEncoder.encode("votes_signature", "UTF-8") + "="
                 + URLEncoder.encode(mVotesSignature, "UTF-8");
@@ -404,40 +404,29 @@ public class VotingApplet extends Applet {
                 MixNetElGamalInterface.getInterface(interfaceName);
 
             // Generate plaintext
-            PGroupElement[] m_a = new PGroupElement[1];
             byte[] iBytes = plaintext.getBytes();
-            m_a[0] = publicKeyPGroup.encode(iBytes, 0, iBytes.length);
-
-            // Encode plaintexts as group elements.
-            PGroupElementArray m = publicKeyPGroup.toElementArray(m_a);
+            PGroupElement a_plaintext = publicKeyPGroup.encode(iBytes, 0, iBytes.length);
 
             // Encrypt the result.
-            PRG prg = new PRGHeuristic();
-
-            Random random = new Random();
-            byte[] seed = new byte[200];
-            random.nextBytes(seed);
-            prg.setSeed(seed);
+            PRG prg = new PRGHeuristic(); // this uses SecureRandom internally
             PRing randomizerPRing = basicPublicKeyPGroup.getPRing();
 
-            PRingElementArray r =
-                randomizerPRing.randomElementArray(1, prg, 20);
+            PRingElement r = randomizerPRing.randomElement(prg, 20);
 
-            PGroupElementArray u = basicPublicKey.exp(r);
-            PGroupElementArray v = publicKey.exp(r).mul(m);
+            PGroupElement u = basicPublicKey.exp(r);
+            PGroupElement v = publicKey.exp(r).mul(a_plaintext);
 
-            PGroupElementArray ciphs =
+            PGroupElement ciph =
                 ((PPGroup)mFullPublicKey.getPGroup()).product(u, v);
 
-            PGroupElement[] ciphElements = ciphs.elements();
-
             // set ciphertext using the format of the interface.
-            mEncryptedVote = mixnetInterface.ciphertextToString(ciphElements[0]);
+            mEncryptedVote = mixnetInterface.ciphertextToString(ciph);
 
             // Calculate hash and convert it to readable hex String
-            MessageDigest sha1 = MessageDigest.getInstance("SHA1");
+            RandomOracle ro = new RandomOracle(
+                new HashfunctionHeuristic("SHA-256"), 2048);
             String HEXES = "0123456789abcdef";
-            byte[] raw = sha1.digest(mEncryptedVote.getBytes());
+            byte[] raw = ro.hash(mEncryptedVote.getBytes());
             StringBuilder hex = new StringBuilder(2 * raw.length);
             for (byte b : raw) {
                 hex.append(HEXES.charAt((b & 0xF0) >> 4))
@@ -447,25 +436,25 @@ public class VotingApplet extends Applet {
 
 
             // Create a verifiable proof of knowledge of the cleartext
-            PRingElementArray s =
-                randomizerPRing.randomElementArray(1, prg, 20);
-            PGroupElementArray a = basicPublicKey.exp(s);
+            PRingElement s = randomizerPRing.randomElement(prg, 20);
+            PGroupElement a = basicPublicKey.exp(s);
             // c = hash(prefix, g, u*v, a)
-            String prefix =  Integer.toString(mPropossal);
-            String g = mFullPublicKeyString;
-            String uv = mEncryptedVote;
-            String aStr = encode(a.get(0).toByteTree().toByteArray());
-            String factorsStr = prefix + g + uv + aStr;
-            byte[] cHash = sha1.digest(factorsStr.getBytes());
+            ByteTree cTree = new ByteTree(
+                new ByteTree(basicPublicKeyPGroup.toByteTree().toByteArray()),
+                new ByteTree(ciph.toByteTree().toByteArray()),
+                new ByteTree(a.toByteTree().toByteArray())
+            );
+            ro = new RandomOracle(new HashfunctionHeuristic("SHA-256"), 2048,
+                ByteTree.intToByteTree(mPropossal));
+            byte[] cHash = ro.hash(cTree.toByteArray());
             // d = cr+s
             prg.setSeed(cHash);
-            PRingElement c =
-                randomizerPRing.randomElementArray(1, prg, 20).get(0);
-            PRingElement d = c.mul(r.get(0)).add(s.get(0));
+            PRingElement c = randomizerPRing.randomElement(prg, 20);
+            PRingElement d = c.mul(r).add(s);
 
-            mAFactor = aStr;
+            mAFactor = encode(a.toByteTree().toByteArray());
             mDFactor = encode(d.toByteTree().toByteArray());
-            mUFactor = encode(u.get(0).toByteTree().toByteArray());
+            mUFactor = encode(u.toByteTree().toByteArray());
         }
 
         public String getAFactor() {

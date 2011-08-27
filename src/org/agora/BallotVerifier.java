@@ -76,6 +76,7 @@ import verificatum.arithm.PRingElementArray;
 import verificatum.crypto.CryptoKeyGen;
 import verificatum.crypto.CryptoKeyGenCramerShoup;
 import verificatum.crypto.CryptoKeyPair;
+import verificatum.crypto.RandomOracle;
 import verificatum.crypto.Hashfunction;
 import verificatum.crypto.HashfunctionHeuristic;
 import verificatum.crypto.PRG;
@@ -181,7 +182,8 @@ public class BallotVerifier {
         mEncryptedVotes = new PGroupElement[votes.length];
         MixNetElGamalInterface mixnetInterface =
             MixNetElGamalInterface.getInterface(interfaceName);
-        MessageDigest sha1 = MessageDigest.getInstance("SHA1");
+        RandomOracle ro = new RandomOracle(
+                new HashfunctionHeuristic("SHA-256"), 2048);
         PRG prg = new PRGHeuristic();
 
         for (int i = 0; i < votes.length; i++) {
@@ -202,20 +204,21 @@ public class BallotVerifier {
             PGroup publicKeyPGroup = publicKey.getPGroup();
             PRing randomizerPRing = basicPublicKeyPGroup.getPRing();
 
-            // c = hash(prefix, g, u*v, a)
-            String prefix =  propossalIds[i];
-            String g = propossalPublicKeys[i];
-            String uv = votes[i];
-            String aStr = aFactors[i];
-            String factorsStr = prefix + g + uv + aStr;
-            byte[] cHash = sha1.digest(factorsStr.getBytes());
-            prg.setSeed(cHash);
-            PRingElement c =
-                randomizerPRing.randomElementArray(1, prg, 20).get(0);
-
             ByteTree bt = new ByteTree(decode(aFactors[i]), null);
             ByteTreeReader btr = bt.getByteTreeReader();
             PGroupElement aFactor = basicPublicKey.getPGroup().toElement(btr);
+
+            // c = hash(prefix, g, u*v, a)
+            ByteTree cTree = new ByteTree(
+                new ByteTree(basicPublicKeyPGroup.toByteTree().toByteArray()),
+                new ByteTree(mEncryptedVotes[i].toByteTree().toByteArray()),
+                new ByteTree(aFactor.toByteTree().toByteArray())
+            );
+            ro = new RandomOracle(new HashfunctionHeuristic("SHA-256"), 2048,
+                ByteTree.intToByteTree(Integer.parseInt(propossalIds[i])));
+            byte[] cHash = ro.hash(cTree.toByteArray());
+            prg.setSeed(cHash);
+            PRingElement c = randomizerPRing.randomElement(prg, 20);
 
             bt = new ByteTree(decode(uFactors[i]), null);
             btr = bt.getByteTreeReader();
