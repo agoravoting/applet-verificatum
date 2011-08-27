@@ -257,15 +257,19 @@ public class BallotVerifier {
         if (issuerCN.contains("cn=ac dnie 001")) {
             certCA = (X509Certificate) cfIssuer.generateCertificate(
                 new VirtualFileInputStream(classLoader.getResourceAsStream(
-                    "certs/ACDNIE001-SHA1.crt")));
+                    "certs/ACDNIE001-SHA2.crt")));
         } else if (issuerCN.contains("cn=ac dnie 002")) {
             certCA = (X509Certificate) cfIssuer.generateCertificate(
                 new VirtualFileInputStream(classLoader.getResourceAsStream(
-                    "certs/ACDNIE002-SHA1.crt")));
+                    "certs/ACDNIE002-SHA2.crt")));
         } else if (issuerCN.contains("cn=ac dnie 003")) {
             certCA = (X509Certificate) cfIssuer.generateCertificate(
                 new VirtualFileInputStream(classLoader.getResourceAsStream(
-                    "certs/ACDNIE003-SHA1.crt")));
+                    "certs/ACDNIE003-SHA2.crt")));
+        } else if (issuerCN.contains("cn=ac raiz dnie")) {
+            certCA = (X509Certificate) cfIssuer.generateCertificate(
+                new VirtualFileInputStream(classLoader.getResourceAsStream(
+                    "certs/ACDRAIZ-SHA2.crt")));
         } else {
             throw new Exception("Invalid certCA");
         }
@@ -302,7 +306,7 @@ public class BallotVerifier {
     }
 
     protected void checkSignature(String signature, String[] votes) throws Exception {
-        Signature sig = Signature.getInstance("SHA1withRSA");
+        Signature sig = Signature.getInstance("SHA256withRSA");
         sig.initVerify(mCertificate.getPublicKey());
         ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
         for (String vote : votes) {

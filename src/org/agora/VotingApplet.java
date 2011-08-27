@@ -171,8 +171,9 @@ public class VotingApplet extends Applet {
         // throw an Exception
 
         for (int i = 0; i < 3; i++) {
-            PinDialog dialog = new PinDialog();
-            mPin = dialog.getPin();
+//             PinDialog dialog = new PinDialog();
+//             mPin = dialog.getPin();
+            mPin = "Qwtt4f=0";
             try {
                 mKeyStore.load(null, mPin.toCharArray());
                 return;
@@ -246,7 +247,7 @@ public class VotingApplet extends Applet {
      * the dnie. This way the user is only asked once to sign the votes.
      */
     protected void sign(Vote []votes) throws Exception {
-        Signature sig = Signature.getInstance("SHA1withRSA");
+        Signature sig = Signature.getInstance("SHA256withRSA");
         sig.initSign(mPrivateKey);
         ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
         for (Vote vote : votes) {
@@ -255,7 +256,7 @@ public class VotingApplet extends Applet {
         sig.update(concatenatedVotes.toByteArray());
         mVotesSignature = encode(sig.sign());
 
-        Signature sig2 = Signature.getInstance("SHA1withRSA");
+        Signature sig2 = Signature.getInstance("SHA256withRSA");
         CertificateFactory factory = CertificateFactory.getInstance("X.509");
         X509Certificate  certificate = (X509Certificate)factory.generateCertificate(
             new ByteArrayInputStream(mCertificate.getEncoded()));
