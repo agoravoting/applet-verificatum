@@ -100,8 +100,8 @@ public class VotingApplet extends Applet {
 
     public void init()
     {
+        System.out.println("automatically init applet");
         super.init();
-        mVotingDelegate.init();
     }
 
     public void paint(Graphics g)
@@ -114,7 +114,7 @@ public class VotingApplet extends Applet {
      * Processes and cast a vote.
      *
      * @param ballot ballot string. The format should be:
-     *              "<vote 1 id>,<propossal 1 id>,[<vote n id>,<propossal n id>, ...]"
+     *              "<vote 1 id>,<proposal 1 id>,[<vote n id>,<proposal n id>, ...]"
      * @param baseUrl base url to use for the web server, for example
      *                https://localhost:8080 (with no ending slash character)
      *
@@ -154,7 +154,7 @@ public class VotingApplet extends Applet {
 
     public class VotingDelegate implements PrivilegedAction {
         protected static final String interfaceName = "native";
-        protected static final String publicKeyURLStr = "/votings/";
+        protected static final String publicKeyURLStr = "/proposals/<#id>/public_key";
         protected static final String sendBallotsURLStr = "/votes";
         protected static final int certainty = 100;
         protected static final String confLinux=
@@ -286,6 +286,8 @@ public class VotingApplet extends Applet {
 
             String ret = null;
             try {
+                init();
+
                 System.out.println("1. initialize the applet");
                 mBaseURLStr = baseUrl;
                 // 1. initialize the applet
@@ -367,7 +369,7 @@ public class VotingApplet extends Applet {
                     + URLEncoder.encode(mVotesSignature, "UTF-8");
             for (Vote vote : votes) {
                 data += "&" + URLEncoder.encode("voting_id[]", "UTF-8") + "="
-                    + URLEncoder.encode(vote.getPropossal()+"", "UTF-8");
+                    + URLEncoder.encode(vote.getProposal()+"", "UTF-8");
                 data += "&" + URLEncoder.encode("encrypted_vote[]", "UTF-8") + "="
                     + URLEncoder.encode(vote.getEncryptedVote(), "UTF-8");
                 data += "&" + URLEncoder.encode("a_factor[]", "UTF-8") + "="
@@ -410,18 +412,18 @@ public class VotingApplet extends Applet {
             Vote[] votes = new Vote[items.length/2];
             for(int i = 0; i < items.length/2; i++) {
                 int vote = Integer.parseInt(items[i*2]);
-                int propossal = Integer.parseInt(items[i*2 + 1]);
-                votes[i] = new Vote(vote, propossal);
+                int proposal = Integer.parseInt(items[i*2 + 1]);
+                votes[i] = new Vote(vote, proposal);
             }
             return votes;
         }
 
         /**
-        * Contains a vote clear text information in the vote and propossal properties.
+        * Contains a vote clear text information in the vote and proposal properties.
         */
         public class Vote {
             protected int mVote = -1;
-            protected int mPropossal = -1;
+            protected int mProposal = -1;
             protected PGroupElement mFullPublicKey = null;
             protected String mFullPublicKeyString = null;
             protected String mEncryptedVote = null;
@@ -430,18 +432,18 @@ public class VotingApplet extends Applet {
             protected String mDFactor = null;
             protected String mUFactor = null;
 
-            public Vote(int vote, int propossal) throws Exception {
-                System.out.println("creating vote for " + vote + " and propossal " + propossal);
+            public Vote(int vote, int proposal) throws Exception {
+                System.out.println("creating vote for " + vote + " and proposal " + proposal);
                 mVote = vote;
-                mPropossal = propossal;
+                mProposal = proposal;
 
                 obtainPublicKey();
                 encrypt();
             }
 
-            // Obtain the public key for this propossal/voting
+            // Obtain the public key for this proposal/voting
             protected void obtainPublicKey() throws Exception {
-                URL publicKeyURL = new URL(mBaseURLStr + publicKeyURLStr + "" + mPropossal);
+                URL publicKeyURL = new URL(mBaseURLStr + publicKeyURLStr.replaceFirst("<#id>", ""+mProposal));
                 HttpURLConnection con = (HttpURLConnection)publicKeyURL.openConnection();
                 // 3. Get the response
                 BufferedReader rd = new BufferedReader(new InputStreamReader(con.getInputStream()));
@@ -513,7 +515,7 @@ public class VotingApplet extends Applet {
                     new ByteTree(a.toByteTree().toByteArray())
                 );
                 ro = new RandomOracle(new HashfunctionHeuristic("SHA-256"), 2048,
-                    ByteTree.intToByteTree(mPropossal));
+                    ByteTree.intToByteTree(mProposal));
                 byte[] cHash = ro.hash(cTree.toByteArray());
                 // d = cr+s
                 prg.setSeed(cHash);
@@ -541,8 +543,8 @@ public class VotingApplet extends Applet {
                 return mVote;
             }
 
-            public int getPropossal() {
-                return mPropossal;
+            public int getProposal() {
+                return mProposal;
             }
 
             public String getEncryptedVote() {
@@ -554,7 +556,7 @@ public class VotingApplet extends Applet {
             }
 
             public String toString() {
-                return "vote id = " + mVote + ", propossal id = " + mPropossal;
+                return "vote id = " + mVote + ", proposal id = " + mProposal;
             }
         }
 
