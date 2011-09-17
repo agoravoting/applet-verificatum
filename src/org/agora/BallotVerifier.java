@@ -2,10 +2,14 @@ package org.agora;
 
 import java.io.*;
 import java.net.*;
+import java.text.SimpleDateFormat;
 import java.security.*;
 import java.security.cert.*;
+import java.security.cert.X509Extension;
 import java.util.*;
 import org.bouncycastle.ocsp.*;
+import org.bouncycastle.asn1.*;
+import org.bouncycastle.asn1.x509.*;
 
 import java.util.Arrays;
 import java.util.Random;
@@ -88,6 +92,11 @@ import verificatum.protocol.mixnet.MixNetElGamalInterface;
  * Class used in Agora to verify that a ballot is valid.
  */
 public class BallotVerifier {
+    // See http://www.inteco.es/extfrontinteco/img/File/intecocert/dnie/pdf/guiades.pdf
+    // page 13
+    public static final String subjectDirectoryAttributesOidStr = "2.5.29.9";
+    public static final String dateOfBirthOidStr = "1.3.6.1.5.5.7.9.1";
+    
     protected static final String interfaceName = "native";
     protected static final int certainty = 100;
 
@@ -153,6 +162,33 @@ public class BallotVerifier {
             new ByteArrayInputStream(decode(serializedCertificate)));
         String subject = mCertificate.getSubjectX500Principal().toString();
 
+        // Check age > 18
+        byte[] bytes = mCertificate.getExtensionValue(subjectDirectoryAttributesOidStr);
+        ASN1InputStream aIn = new ASN1InputStream(new ByteArrayInputStream(bytes));
+        ASN1OctetString octs = (ASN1OctetString) aIn.readObject();
+        aIn = new ASN1InputStream(new ByteArrayInputStream(octs.getOctets()));
+        ASN1Sequence seq = (ASN1Sequence)aIn.readObject();
+        SimpleDateFormat dateF = new SimpleDateFormat("yyyyMMdd");
+        boolean ageCorrect = false;
+        for (int i = 0; i < seq.size(); i++) {
+            Attribute attr = Attribute.getInstance(seq.getObjectAt(i));
+            if (attr.getAttrType().getId().equals(dateOfBirthOidStr)) {
+                ASN1Set set = attr.getAttrValues();
+                // Come on, we'll only allow one dateOfBirth, we're not allowing
+                // such frauds with multiple birth dates
+                DERGeneralizedTime time = DERGeneralizedTime.getInstance(set.getObjectAt(0));
+                Date date = time.getDate();
+                Calendar cal = Calendar.getInstance();
+                cal.add(Calendar.YEAR, -18);
+                
+                String dateStr = dateF.format(date);
+                ageCorrect = date.before(cal.getTime());
+                System.out.println("BINGO " + ageCorrect + "date of birth = " + dateStr + "\n\n");
+            }
+        }
+        if (!ageCorrect) {
+            throw new Exception("Voter is not 18 years old yet");
+        }
         // Example of subject:
         // CN="DE LOS PALOTES MARIANOS, ANTONIO EDUARDO (FIRMA)", GIVENNAME=ANTONIO EDUARDO, SURNAME=DE LOS PALOTES, SERIALNUMBER=012345678D, C=ES
 
