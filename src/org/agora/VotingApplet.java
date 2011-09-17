@@ -1,6 +1,7 @@
 package org.agora;
 
 import java.util.Arrays;
+import netscape.javascript.JSObject;
 import java.applet.Applet;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -102,6 +103,16 @@ public class VotingApplet extends Applet {
     {
         System.out.println("automatically init applet");
         super.init();
+        asyncUpdate("INITIALIZED", "applet is up and running");
+    }
+
+    public void asyncUpdate(String code, String description)
+    {
+        JSObject win = JSObject.getWindow(this);
+        Object params[] = new Object[2];
+        params[0] = code;
+        params[1] = description;
+        win.call("async_update", params);
     }
 
     public void paint(Graphics g)
@@ -119,19 +130,28 @@ public class VotingApplet extends Applet {
      *                https://localhost:8080 (with no ending slash character)
      *
      * @return a list of comma-separated hashes of the votes if the votes were
-     *         correctly casted, or "FAIL" otherwise.
+     *         correctly casted, or "FAIL" otherwise, using asyncUpdate().
      */
-    public String vote(String ballot, String baseUrl)
+    public void vote(String ballot, String baseUrl)
     {
-        try {
-            mVotingDelegate.setBallot(ballot);
-            mVotingDelegate.setBaseUrl(baseUrl);
-            AccessController.doPrivileged(mVotingDelegate);
-            return mVotingDelegate.returnValue();
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "FAIL";
-        }
+        final String ballotFinal = ballot;
+        final String baseUrlFinal = baseUrl;
+        final VotingApplet appletFinal = this;
+        Thread t = new Thread(new Runnable() {
+            public void run()
+            {
+                try {
+                    mVotingDelegate.setBallot(ballotFinal);
+                    mVotingDelegate.setBaseUrl(baseUrlFinal);
+                    mVotingDelegate.setVotingApple(appletFinal);
+                    AccessController.doPrivileged(mVotingDelegate);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    asyncUpdate("FAIL", "some error occured");
+                }
+            }
+        });
+        t.start();
     }
 
     /**
@@ -146,9 +166,9 @@ public class VotingApplet extends Applet {
         VotingApplet applet = new VotingApplet();
         applet.init();
         String ballotStr = "0,1,01,1";
-        String hashes = applet.vote(ballotStr, args[0]);
-        System.out.println("vote result = " + hashes);
-        System.exit(hashes != "FAIL" ? 0 : 1);
+        /*String hashes = */applet.vote(ballotStr, args[0]);
+//         System.out.println("vote result = " + hashes);
+//         System.exit(hashes != "FAIL" ? 0 : 1);
         return;
     }
 
@@ -166,6 +186,7 @@ public class VotingApplet extends Applet {
         protected static final String certAlias="CertFirmaDigital";
 
         protected RandomSource mRandomSource = null;
+        protected VotingApplet mApplet = null;
 
         protected KeyStore mKeyStore = null;
         protected Certificate mCertificate = null;
@@ -185,6 +206,10 @@ public class VotingApplet extends Applet {
 
         void setBaseUrl(String baseUrl) {
             mBaseUrl = baseUrl;
+        }
+
+        void setVotingApple(VotingApplet applet) {
+            mApplet = applet;
         }
 
         String returnValue() {
@@ -291,16 +316,19 @@ public class VotingApplet extends Applet {
                 System.out.println("1. initialize the applet");
                 mBaseURLStr = baseUrl;
                 // 1. initialize the applet
+                mApplet.asyncUpdate("INIT_DNI", "Loading the DNIe certificate");
                 initialize();
 
                 // 2. Obtain the ballots
                 System.out.println("2. Obtain the ballots");
+                mApplet.asyncUpdate("FORGING_BALLOTS", "Creating the ballots");
                 Vote[] votes = parseBallotString(ballot);
 
                 sign(votes);
 
                 // 3. Send the ballots to the agora server
                 System.out.println("3. Send the ballots to the agora server");
+                mApplet.asyncUpdate("SENDING_BALLOTS", "Sending the ballots to the server");
                 sendBallots(votes);
 
                 // 4. create return value
@@ -316,6 +344,7 @@ public class VotingApplet extends Applet {
             } catch (Exception e) {
                 e.printStackTrace();
                 ret = "FAIL";
+                mApplet.asyncUpdate(ret, e.getMessage());
             } finally {
                 // close everything
                 mRandomSource = null;
@@ -325,6 +354,9 @@ public class VotingApplet extends Applet {
                 mPin = null;
             }
             mReturnValue = ret;
+            if (mReturnValue != "FAIL") {
+                mApplet.asyncUpdate("SUCCESS", mReturnValue);
+            }
             return null;
         }
 
