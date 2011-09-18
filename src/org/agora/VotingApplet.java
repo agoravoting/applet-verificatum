@@ -84,6 +84,30 @@ public class VotingApplet extends Applet {
     protected VotingDelegate mVotingDelegate = new VotingDelegate();
     protected String mAppletInfo = "Agora Ciudadana v0.1";
 
+    class PinCancelledByUser extends Exception {
+        public PinCancelledByUser(String message) {
+            super(message);
+        }
+    }
+
+    class BallotCastingError extends Exception {
+        public BallotCastingError(String message) {
+            super(message);
+        }
+    }
+
+    class SignatureCertificateNotFoundError extends Exception {
+        public SignatureCertificateNotFoundError(String message) {
+            super(message);
+        }
+    }
+
+    class CertificateWithoutPrivateKeyError extends Exception {
+        public CertificateWithoutPrivateKeyError(String message) {
+            super(message);
+        }
+    }
+
     static String encode(byte[] bytes) throws Exception {
         byte[] encoded = Base64.encodeBase64(bytes);
         return new String(encoded, "ASCII");
@@ -265,7 +289,7 @@ public class VotingApplet extends Applet {
                 }
             }
             if (mCertificate == null) {
-                throw new Exception("Signature certificate not found");
+                throw new SignatureCertificateNotFoundError("Signature certificate not found");
             }
             String subject = ((X509Certificate)mCertificate).getSubjectX500Principal().toString();
             System.out.println("certsubject = '" + subject + "'");
@@ -278,7 +302,7 @@ public class VotingApplet extends Applet {
 
             Key key = mKeyStore.getKey(certAlias, mPin.toCharArray());
             if(!(key instanceof PrivateKey)) {
-                throw new Exception("The certificate has no associated private key");
+                throw new CertificateWithoutPrivateKeyError("The certificate has no associated private key");
             }
             mPrivateKey = (PrivateKey)key;
         }
@@ -434,7 +458,7 @@ public class VotingApplet extends Applet {
             } else {
                 System.out.println("response code = '" + con.getResponseCode() + "' vs '" +
                     HttpURLConnection.HTTP_OK + "'");
-                throw new Exception("There was a problem casting the ballot");
+                throw new BallotCastingError("There was a problem casting the ballot");
             }
         }
 
@@ -665,7 +689,7 @@ public class VotingApplet extends Applet {
             */
             public String getPin() throws Exception {
                 if(!mSuccess) {
-                    throw new Exception("User Cancelled the PIN Dialog");
+                    throw new PinCancelledByUser("User Cancelled the PIN Dialog");
                 }
                 mPasswordField.setText("");
                 return mPin;
