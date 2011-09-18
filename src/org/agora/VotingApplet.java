@@ -216,7 +216,7 @@ public class VotingApplet extends Applet {
         protected static final String confWindows=
             "name=OpenSC-OpenDNIe\r\nlibrary=C:\\WINDOWS\\system32\\opensc-pkcs11.dll\r\n";
         protected static final String confMac=
-            "name=OpenSC-OpenDNIe\nlibrary=/usr/local/lib/opensc-pkcs11.so\n";
+            "name=OpenSC-OpenDNIe\nlibrary=/Library/OpenSC/lib/opensc-pkcs11.so\n";
         protected static final String certAlias="CertFirmaDigital";
 
         protected RandomSource mRandomSource = null;
