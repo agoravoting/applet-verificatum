@@ -115,6 +115,15 @@ public class VotingApplet extends Applet {
         win.call("async_update", params);
     }
 
+    public void asyncException(Exception e)
+    {
+        JSObject win = JSObject.getWindow(this);
+        Object params[] = new Object[2];
+        params[0] = e.getClass().getName();
+        params[1] = e.getMessage();
+        win.call("async_exception", params);
+    }
+
     public void paint(Graphics g)
     {
         super.paint(g);
@@ -140,6 +149,7 @@ public class VotingApplet extends Applet {
         Thread t = new Thread(new Runnable() {
             public void run()
             {
+                asyncUpdate("VOTING", "Starting to send a vote..");
                 try {
                     mVotingDelegate.setBallot(ballotFinal);
                     mVotingDelegate.setBaseUrl(baseUrlFinal);
@@ -147,7 +157,7 @@ public class VotingApplet extends Applet {
                     AccessController.doPrivileged(mVotingDelegate);
                 } catch (Exception e) {
                     e.printStackTrace();
-                    asyncUpdate("FAIL", "some error occured");
+                    asyncException(e);
                 }
             }
         });
@@ -216,26 +226,22 @@ public class VotingApplet extends Applet {
             return mReturnValue;
         }
 
-        public void init()
+        public void init() throws Exception
         {
-            try {
-                // Create PKCS#11 provider
-                String config = "";
-                String osName = System.getProperty("os.name").toLowerCase();
-                if (osName.startsWith("win")) {
-                    config = confWindows;
-                } else if (osName.startsWith("lin")) {
-                    config = confLinux;
-                } else if (osName.startsWith("mac")) {
-                    config = confMac;
-                }
-
-                mProvider = new sun.security.pkcs11.SunPKCS11(
-                    new ByteArrayInputStream(config.getBytes()));
-                Security.addProvider(mProvider);
-            }catch(Exception e) {
-                e.printStackTrace();
+            // Create PKCS#11 provider
+            String config = "";
+            String osName = System.getProperty("os.name").toLowerCase();
+            if (osName.startsWith("win")) {
+                config = confWindows;
+            } else if (osName.startsWith("lin")) {
+                config = confLinux;
+            } else if (osName.startsWith("mac")) {
+                config = confMac;
             }
+
+            mProvider = new sun.security.pkcs11.SunPKCS11(
+                new ByteArrayInputStream(config.getBytes()));
+            Security.addProvider(mProvider);
         }
 
         /**
@@ -309,7 +315,9 @@ public class VotingApplet extends Applet {
             String ballot = mBallot;
             String baseUrl = mBaseUrl;
 
-            String ret = null;
+            // The default value is ret, and if something goes wrong, it must be
+            // "FAIL"
+            String ret = "FAIL";
             try {
                 init();
 
@@ -343,8 +351,8 @@ public class VotingApplet extends Applet {
                 ret = hashes;
             } catch (Exception e) {
                 e.printStackTrace();
-                ret = "FAIL";
-                mApplet.asyncUpdate(ret, e.getMessage());
+                mReturnValue = "FAIL";
+                mApplet.asyncException(e);
             } finally {
                 // close everything
                 mRandomSource = null;
@@ -367,19 +375,13 @@ public class VotingApplet extends Applet {
         protected void sign(Vote []votes) throws Exception {
             Signature sig = Signature.getInstance("SHA256withRSA");
             sig.initSign(mPrivateKey);
+
             ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
             for (Vote vote : votes) {
                 concatenatedVotes.write(vote.getEncryptedVote().getBytes());
             }
             sig.update(concatenatedVotes.toByteArray());
             mVotesSignature = encode(sig.sign());
-
-            Signature sig2 = Signature.getInstance("SHA256withRSA");
-            CertificateFactory factory = CertificateFactory.getInstance("X.509");
-            X509Certificate  certificate = (X509Certificate)factory.generateCertificate(
-                new ByteArrayInputStream(mCertificate.getEncoded()));
-            sig2.initVerify(mCertificate.getPublicKey());
-            sig2.initVerify(certificate.getPublicKey());
         }
 
         /**
