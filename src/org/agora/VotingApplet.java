@@ -4,6 +4,7 @@ import java.util.Arrays;
 import netscape.javascript.JSObject;
 import java.applet.Applet;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
@@ -84,6 +85,33 @@ public class VotingApplet extends Applet {
     protected VotingDelegate mVotingDelegate = new VotingDelegate();
     protected String mAppletInfo = "Agora Ciudadana v0.1";
 
+    public class SimpleLock {
+        private boolean isLocked = false;
+
+        public synchronized void lock() {
+            System.out.println("lock");
+            try {
+                unsafeLock();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        public synchronized void unsafeLock() throws InterruptedException {
+            while (isLocked) {
+                wait();
+            }
+            isLocked = true;
+        }
+
+        public synchronized void unlock() {
+            System.out.println("unlock");
+            isLocked = false;
+            notify();
+        }
+    }
+    protected SimpleLock mLock = new SimpleLock();
+
     class PinCancelledByUser extends Exception {
         public PinCancelledByUser(String message) {
             super(message);
@@ -108,6 +136,12 @@ public class VotingApplet extends Applet {
         }
     }
 
+    class InitTimeoutError extends Exception {
+        public InitTimeoutError(String message) {
+            super(message);
+        }
+    }
+
     static String encode(byte[] bytes) throws Exception {
         byte[] encoded = Base64.encodeBase64(bytes);
         return new String(encoded, "ASCII");
@@ -123,11 +157,61 @@ public class VotingApplet extends Applet {
         return mAppletInfo;
     }
 
+    public void terminateApplet()
+    {
+        AccessController.doPrivileged(new PrivilegedAction() {
+            public Object run() {
+                System.exit(0);
+                return null;
+            }
+        });
+    }
+
     public void init()
     {
         System.out.println("automatically init applet");
         super.init();
         asyncUpdate("INITIALIZED", "applet is up and running");
+
+        final VotingApplet appletFinal = this;
+        // Threads that checks every once in a while that the dnie card reader
+        // and card are still there
+        Thread t = new Thread(new Runnable() {
+            public void run()
+            {
+                while (true) {
+                    System.out.println("checking card inside reader");
+                    AccessController.doPrivileged(new PrivilegedAction() {
+                        public Object run() {
+                            final long startTime = System.nanoTime();
+                            appletFinal.mLock.lock();
+
+                            try {
+                                appletFinal.mVotingDelegate.setVotingApple(appletFinal);
+                                appletFinal.mVotingDelegate.init();
+                                final long endTime = System.nanoTime();
+                                final long duration = endTime - startTime;
+                                appletFinal.asyncUpdate("card inside reader", "took " + duration);
+                            } catch (Exception e) {
+//                                 e.printStackTrace();
+                                appletFinal.asyncException(e);
+                            }
+                            appletFinal.mLock.unlock();
+
+                            return null;
+                        }
+                    });
+                    try {
+                        Thread.sleep(4000);
+                    } catch (Exception e) {
+                        // Should never happen
+                        e.printStackTrace();
+                        appletFinal.asyncException(e);
+                    }
+                }
+            }
+        });
+        t.start();
     }
 
     public void asyncUpdate(String code, String description)
@@ -145,6 +229,9 @@ public class VotingApplet extends Applet {
         Object params[] = new Object[2];
         params[0] = e.getClass().getName();
         params[1] = e.getMessage();
+
+        System.out.println("asyncError: ");
+        System.out.println(e.getClass().getName() + ": " + e.getMessage());
         win.call("async_exception", params);
     }
 
@@ -174,6 +261,7 @@ public class VotingApplet extends Applet {
             public void run()
             {
                 asyncUpdate("VOTING", "Starting to send a vote..");
+                appletFinal.mLock.lock();
                 try {
                     mVotingDelegate.setBallot(ballotFinal);
                     mVotingDelegate.setBaseUrl(baseUrlFinal);
@@ -183,6 +271,7 @@ public class VotingApplet extends Applet {
                     e.printStackTrace();
                     asyncException(e);
                 }
+                appletFinal.mLock.unlock();
             }
         });
         t.start();
@@ -233,6 +322,8 @@ public class VotingApplet extends Applet {
         protected String mBallot = null;
         protected String mBaseUrl = null;
         protected String mReturnValue = null;
+        protected SimpleLock mInitLock = new SimpleLock();
+        protected boolean mInsideInit = false;
 
         void setBallot(String ballot) {
             mBallot = ballot;
@@ -252,6 +343,27 @@ public class VotingApplet extends Applet {
 
         public void init() throws Exception
         {
+            // This threads guarantees that if init() takes too long, then
+            // the applet will emit a timeout
+            mInsideInit = true;
+            Thread t = new Thread(new Runnable() {
+                public void run()
+                {
+                    try {
+                        Thread.sleep(5000);
+                        mInitLock.lock();
+                        if (mInsideInit) {
+                            mApplet.asyncException(new InitTimeoutError("call to init took too long"));
+                        }
+                        mInitLock.unlock();
+                    } catch (Exception e) {
+                        // Should never happen
+                        e.printStackTrace();
+                        mApplet.asyncException(e);
+                    }
+                }
+            });
+            t.start();
             // Create PKCS#11 provider
             String config = "";
             String osName = System.getProperty("os.name").toLowerCase();
@@ -266,17 +378,25 @@ public class VotingApplet extends Applet {
             mProvider = new sun.security.pkcs11.SunPKCS11(
                 new ByteArrayInputStream(config.getBytes()));
             Security.addProvider(mProvider);
+
+            // Create the keyStore
+            mKeyStore = KeyStore.getInstance("PKCS11", mProvider);
+            mApplet.asyncUpdate("CARD FOUND", "Loading the DNIe certificate... (second part)");
+            mInitLock.lock();
+            mInsideInit = false;
+            mInitLock.unlock();
         }
 
         /**
         * Initialize the applet.
         */
         protected void initialize() throws Exception {
+            if (mKeyStore == null) {
+                init();
+            }
             mRandomSource = new PRGHeuristic();
 
-            // Create the keyStore and initialize it with the PIN
-            mKeyStore = KeyStore.getInstance("PKCS11", mProvider);
-
+            // initialize the keystore with the PIN
             obtainPin();
 
             // Find signing cert in the cert list
@@ -322,8 +442,9 @@ public class VotingApplet extends Applet {
                     mKeyStore.load(null, mPin.toCharArray());
                     System.out.println("Pin loaded");
                     return;
-                } catch (Exception e) {
+                } catch (IOException e) {
                     // PIN failed trying again..
+                    e.printStackTrace();
                     System.out.println("Pin not correctly loaded");
                     JOptionPane.showMessageDialog(VotingApplet.this,
                         "Incorrect PIN, please enter your PIN and try again",
@@ -343,7 +464,7 @@ public class VotingApplet extends Applet {
             // "FAIL"
             String ret = "FAIL";
             try {
-                init();
+//                 init();
 
                 System.out.println("1. initialize the applet");
                 mBaseURLStr = baseUrl;
@@ -675,10 +796,6 @@ public class VotingApplet extends Applet {
                         return;
                     }
                     mSuccess = true;
-                } else {
-                    JOptionPane.showMessageDialog(PinDialog.this,
-                        "You cancelled to write the DNI-e PIN, voting cancelled",
-                        "Cancelled", JOptionPane.ERROR_MESSAGE);
                 }
                 setVisible(false);
             }
