@@ -121,8 +121,32 @@ public class VotingApplet extends Applet {
         }
     }
 
-    class VoteTimeoutError extends Exception {
-        public VoteTimeoutError(String message) {
+    class PinTimeoutError extends Exception {
+        public PinTimeoutError(String message) {
+            super(message);
+        }
+    }
+
+    class UserInputTimeoutError extends Exception {
+        public UserInputTimeoutError(String message) {
+            super(message);
+        }
+    }
+
+    class LoadCardDataTimeoutError extends Exception {
+        public LoadCardDataTimeoutError(String message) {
+            super(message);
+        }
+    }
+
+    class SignatureTimeoutError extends Exception {
+        public SignatureTimeoutError(String message) {
+            super(message);
+        }
+    }
+
+    class SendBallotsTimeoutError extends Exception {
+        public SendBallotsTimeoutError(String message) {
             super(message);
         }
     }
@@ -373,35 +397,49 @@ public class VotingApplet extends Applet {
             // need to call this to be able to access to mKeyStore
             obtainPin();
 
-            // Find signing cert in the cert list
-            mCertificate = null;
-            for (Enumeration<String> e = mKeyStore.aliases(); e.hasMoreElements();) {
-                String alias =e.nextElement();
-                System.out.println("alias = " + alias);
-                if (alias.equals(certAlias)) {
-                    mCertificate = mKeyStore.getCertificate(alias);
+            SimpleTimeout timeout = new SimpleTimeout(60*1000) {
+                public void timeout()
+                {
+                    mApplet.asyncException(new LoadCardDataTimeoutError("call to initialize() took too long"));
                 }
+            };
+            timeout.start();
+            try {
+                // Find signing cert in the cert list
+                mCertificate = null;
+                for (Enumeration<String> e = mKeyStore.aliases(); e.hasMoreElements();) {
+                    String alias =e.nextElement();
+                    System.out.println("alias = " + alias);
+                    if (alias.equals(certAlias)) {
+                        mCertificate = mKeyStore.getCertificate(alias);
+                    }
+                }
+                if (mCertificate == null) {
+                    throw new SignatureCertificateNotFoundError("Signature certificate not found");
+                }
+                String subject = ((X509Certificate)mCertificate).getSubjectX500Principal().toString();
+                System.out.println("certsubject = '" + subject + "'");
+
+
+                String serializedCertificate = encode(mCertificate.getEncoded());
+                CertificateFactory factory = CertificateFactory.getInstance("X.509");
+                X509Certificate certificate = (X509Certificate)factory.generateCertificate(
+                    new ByteArrayInputStream(decode(serializedCertificate)));
+
+                // initialize the keystore with the PIN
+                Key key = mKeyStore.getKey(certAlias, mPin.toCharArray());
+                mPin = null;
+
+                if(!(key instanceof PrivateKey)) {
+                    throw new CertificateWithoutPrivateKeyError("The certificate has no associated private key");
+                }
+                mPrivateKey = (PrivateKey)key;
+
+                timeout.finish();
+            } catch (Exception e) {
+                timeout.finish();
+                throw e;
             }
-            if (mCertificate == null) {
-                throw new SignatureCertificateNotFoundError("Signature certificate not found");
-            }
-            String subject = ((X509Certificate)mCertificate).getSubjectX500Principal().toString();
-            System.out.println("certsubject = '" + subject + "'");
-
-
-            String serializedCertificate = encode(mCertificate.getEncoded());
-            CertificateFactory factory = CertificateFactory.getInstance("X.509");
-            X509Certificate certificate = (X509Certificate)factory.generateCertificate(
-                new ByteArrayInputStream(decode(serializedCertificate)));
-
-            // initialize the keystore with the PIN
-            Key key = mKeyStore.getKey(certAlias, mPin.toCharArray());
-            mPin = null;
-
-            if(!(key instanceof PrivateKey)) {
-                throw new CertificateWithoutPrivateKeyError("The certificate has no associated private key");
-            }
-            mPrivateKey = (PrivateKey)key;
         }
 
         /**
@@ -414,12 +452,35 @@ public class VotingApplet extends Applet {
 
             for (int i = 0; i < 3; i++) {
                 PinDialog dialog = new PinDialog();
-                mPin = dialog.getPin();
+                SimpleTimeout timeout = new SimpleTimeout(60*1000) {
+                    public void timeout()
+                    {
+                        mApplet.asyncException(new UserInputTimeoutError("User took too long to write pin"));
+                    }
+                };
+                timeout.start();
+                try {
+                    mPin = dialog.getPin();
+                    timeout.finish();
+                } catch (IOException e) {
+                    timeout.finish();
+                    throw e;
+                }
+
+                timeout = new SimpleTimeout(60*1000) {
+                    public void timeout()
+                    {
+                        mApplet.asyncException(new PinTimeoutError("Pin processing took too long in the card"));
+                    }
+                };
+                timeout.start();
                 try {
                     mKeyStore.load(null, mPin.toCharArray());
+                    timeout.finish();
                     System.out.println("Pin loaded");
                     return;
                 } catch (IOException e) {
+                    timeout.finish();
                     // PIN failed trying again..
                     e.printStackTrace();
                     System.out.println("Pin not correctly loaded");
@@ -434,13 +495,6 @@ public class VotingApplet extends Applet {
         }
 
         public Object run() {
-            SimpleTimeout timeout = new SimpleTimeout(120*1000) {
-                public void timeout()
-                {
-                    mApplet.asyncException(new VoteTimeoutError("call to vote() took too long"));
-                }
-            };
-            timeout.start();
             String ballot = mBallot;
             String baseUrl = mBaseUrl;
 
@@ -457,9 +511,8 @@ public class VotingApplet extends Applet {
 
                 // 2. Obtain the ballots
                 System.out.println("2. Obtain the ballots");
-                mApplet.asyncUpdate("FORGING_BALLOTS", "Creating the ballots");
+                mApplet.asyncUpdate("FORGING_BALLOTS", "Creating and signing the ballots");
                 Vote[] votes = parseBallotString(ballot);
-
                 sign(votes);
 
                 // 3. Send the ballots to the agora server
@@ -489,7 +542,6 @@ public class VotingApplet extends Applet {
                 mPrivateKey = null;
                 mPin = null;
             }
-            timeout.finish();
             mReturnValue = ret;
             if (mReturnValue != "FAIL") {
                 mApplet.asyncUpdate("SUCCESS", mReturnValue);
@@ -502,70 +554,97 @@ public class VotingApplet extends Applet {
         * the dnie. This way the user is only asked once to sign the votes.
         */
         protected void sign(Vote []votes) throws Exception {
-            Signature sig = Signature.getInstance("SHA256withRSA");
-            sig.initSign(mPrivateKey);
+            SimpleTimeout timeout = new SimpleTimeout(60*1000) {
+                public void timeout()
+                {
+                    mApplet.asyncException(new SignatureTimeoutError("call to sign() took too long"));
+                }
+            };
+            timeout.start();
+            try {
+                Signature sig = Signature.getInstance("SHA256withRSA");
+                sig.initSign(mPrivateKey);
 
-            ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
-            for (Vote vote : votes) {
-                concatenatedVotes.write(vote.getEncryptedVote().getBytes());
+                ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
+                for (Vote vote : votes) {
+                    concatenatedVotes.write(vote.getEncryptedVote().getBytes());
+                }
+                sig.update(concatenatedVotes.toByteArray());
+                mVotesSignature = encode(sig.sign());
+                // Not needed anymore
+                mPrivateKey = null;
+                timeout.finish();
+            } catch (Exception e) {
+                timeout.finish();
+                throw e;
             }
-            sig.update(concatenatedVotes.toByteArray());
-            mVotesSignature = encode(sig.sign());
-            // Not needed anymore
-            mPrivateKey = null;
         }
 
         /**
         * Sends the ballots to the agora server. Throws an exception if it fails.
         */
         protected void sendBallots(Vote []votes) throws Exception {
-            // Needs to send three things:
-            // 1. The DNIe certificate, serialized
-            // 2. For each vote, the encrypted vote
-            // 3. For each vote, the signature of the encrypted vote
+            SimpleTimeout timeout = new SimpleTimeout(60*1000) {
+                public void timeout()
+                {
+                    mApplet.asyncException(new SendBallotsTimeoutError("call to sendBallots() took too long"));
+                }
+            };
+            timeout.start();
+            try {
+                // Needs to send three things:
+                // 1. The DNIe certificate, serialized
+                // 2. For each vote, the encrypted vote
+                // 3. For each vote, the signature of the encrypted vote
 
-            // Serialize the certificate
-            String serializedCertificate = encode(mCertificate.getEncoded());
+                // Serialize the certificate
+                String serializedCertificate = encode(mCertificate.getEncoded());
 
-            // 1. Generate the POST data
-            String data = URLEncoder.encode("dnie_certificate", "UTF-8") + "="
-                        + URLEncoder.encode(serializedCertificate, "UTF-8");
-            data += "&" + URLEncoder.encode("votes_signature", "UTF-8") + "="
-                    + URLEncoder.encode(mVotesSignature, "UTF-8");
-            for (Vote vote : votes) {
-                data += "&" + URLEncoder.encode("voting_id[]", "UTF-8") + "="
-                    + URLEncoder.encode(vote.getProposal()+"", "UTF-8");
-                data += "&" + URLEncoder.encode("encrypted_vote[]", "UTF-8") + "="
-                    + URLEncoder.encode(vote.getEncryptedVote(), "UTF-8");
-                data += "&" + URLEncoder.encode("a_factor[]", "UTF-8") + "="
-                    + URLEncoder.encode(vote.getAFactor(), "UTF-8");
-                data += "&" + URLEncoder.encode("d_factor[]", "UTF-8") + "="
-                    + URLEncoder.encode(vote.getDFactor(), "UTF-8");
-                data += "&" + URLEncoder.encode("u_factor[]", "UTF-8") + "="
-                    + URLEncoder.encode(vote.getUFactor(), "UTF-8");
-            }
+                // 1. Generate the POST data
+                String data = URLEncoder.encode("dnie_certificate", "UTF-8") + "="
+                            + URLEncoder.encode(serializedCertificate, "UTF-8");
+                data += "&" + URLEncoder.encode("votes_signature", "UTF-8") + "="
+                        + URLEncoder.encode(mVotesSignature, "UTF-8");
+                for (Vote vote : votes) {
+                    data += "&" + URLEncoder.encode("voting_id[]", "UTF-8") + "="
+                        + URLEncoder.encode(vote.getProposal()+"", "UTF-8");
+                    data += "&" + URLEncoder.encode("encrypted_vote[]", "UTF-8") + "="
+                        + URLEncoder.encode(vote.getEncryptedVote(), "UTF-8");
+                    data += "&" + URLEncoder.encode("a_factor[]", "UTF-8") + "="
+                        + URLEncoder.encode(vote.getAFactor(), "UTF-8");
+                    data += "&" + URLEncoder.encode("d_factor[]", "UTF-8") + "="
+                        + URLEncoder.encode(vote.getDFactor(), "UTF-8");
+                    data += "&" + URLEncoder.encode("u_factor[]", "UTF-8") + "="
+                        + URLEncoder.encode(vote.getUFactor(), "UTF-8");
+                }
 
-            // 2. Send the request
-            System.out.println("Send the request");
-            URL sendBallotsURL = new URL(mBaseURLStr + sendBallotsURLStr);
-            HttpURLConnection con = (HttpURLConnection)sendBallotsURL.openConnection();
-            con.setDoOutput(true);
-            OutputStreamWriter wr = new OutputStreamWriter(con.getOutputStream());
-            wr.write(data);
-            wr.flush();
+                // 2. Send the request
+                System.out.println("Send the request");
+                URL sendBallotsURL = new URL(mBaseURLStr + sendBallotsURLStr);
+                HttpURLConnection con = (HttpURLConnection)sendBallotsURL.openConnection();
+                con.setDoOutput(true);
+                OutputStreamWriter wr = new OutputStreamWriter(con.getOutputStream());
+                wr.write(data);
+                wr.flush();
 
-            // 3. Get the response
-            System.out.println("Get the response for data = " + data);
-            wr.close();
+                // 3. Get the response
+                System.out.println("Get the response for data = " + data);
+                wr.close();
 
-            System.out.println("Process the response");
-            // 4. Process the response
-            if (con.getResponseCode() == HttpURLConnection.HTTP_OK) {
-                return;
-            } else {
-                System.out.println("response code = '" + con.getResponseCode() + "' vs '" +
-                    HttpURLConnection.HTTP_OK + "'");
-                throw new BallotCastingError("There was a problem casting the ballot");
+                System.out.println("Process the response");
+                timeout.finish();
+
+                // 4. Process the response
+                if (con.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                    return;
+                } else {
+                    System.out.println("response code = '" + con.getResponseCode() + "' vs '" +
+                        HttpURLConnection.HTTP_OK + "'");
+                    throw new BallotCastingError("There was a problem casting the ballot");
+                }
+            } catch (Exception e) {
+                timeout.finish();
+                throw e;
             }
         }
 
