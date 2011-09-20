@@ -1,5 +1,7 @@
 package org.agora;
 
+import org.agora.utils.*;
+
 import java.util.Arrays;
 import netscape.javascript.JSObject;
 import java.applet.Applet;
@@ -28,8 +30,11 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 
 import javax.swing.JDialog;
+import javax.swing.Action;
+import javax.swing.AbstractAction;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.KeyStroke;
 import javax.swing.JLabel;
 import javax.swing.JButton;
 import javax.swing.BoxLayout;
@@ -84,32 +89,6 @@ import verificatum.protocol.mixnet.MixNetElGamalInterface;
 public class VotingApplet extends Applet {
     protected VotingDelegate mVotingDelegate = new VotingDelegate();
     protected String mAppletInfo = "Agora Ciudadana v0.1";
-
-    public class SimpleLock {
-        private boolean isLocked = false;
-
-        public synchronized void lock() {
-            System.out.println("lock");
-            try {
-                unsafeLock();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-
-        public synchronized void unsafeLock() throws InterruptedException {
-            while (isLocked) {
-                wait();
-            }
-            isLocked = true;
-        }
-
-        public synchronized void unlock() {
-            System.out.println("unlock");
-            isLocked = false;
-            notify();
-        }
-    }
     protected SimpleLock mLock = new SimpleLock();
 
     class PinCancelledByUser extends Exception {
@@ -138,6 +117,12 @@ public class VotingApplet extends Applet {
 
     class InitTimeoutError extends Exception {
         public InitTimeoutError(String message) {
+            super(message);
+        }
+    }
+
+    class VoteTimeoutError extends Exception {
+        public VoteTimeoutError(String message) {
             super(message);
         }
     }
@@ -195,8 +180,9 @@ public class VotingApplet extends Applet {
                             } catch (Exception e) {
 //                                 e.printStackTrace();
                                 appletFinal.asyncException(e);
+                            } finally {
+                                appletFinal.mLock.unlock();
                             }
-                            appletFinal.mLock.unlock();
 
                             return null;
                         }
@@ -220,6 +206,7 @@ public class VotingApplet extends Applet {
         Object params[] = new Object[2];
         params[0] = code;
         params[1] = description;
+        System.out.println("update with code = " + code);
         win.call("async_update", params);
     }
 
@@ -245,12 +232,12 @@ public class VotingApplet extends Applet {
      * Processes and cast a vote.
      *
      * @param ballot ballot string. The format should be:
-     *              "<vote 1 id>,<proposal 1 id>,[<vote n id>,<proposal n id>, ...]"
+     *              "<vote 1 id>,<proposal 1 id>,<proposal 1 public key>,
+     *              [<vote n id>,<proposal n id>,<proposal n public key> ...]"
      * @param baseUrl base url to use for the web server, for example
-     *                https://localhost:8080 (with no ending slash character)
+     *                https://localhost:3000 (with no ending slash character)
      *
-     * @return a list of comma-separated hashes of the votes if the votes were
-     *         correctly casted, or "FAIL" otherwise, using asyncUpdate().
+     * @return "SUCCESS" via asyncUpdate or some kind of error via asyncException.
      */
     public void vote(String ballot, String baseUrl)
     {
@@ -270,8 +257,9 @@ public class VotingApplet extends Applet {
                 } catch (Exception e) {
                     e.printStackTrace();
                     asyncException(e);
+                } finally {
+                    appletFinal.mLock.unlock();
                 }
-                appletFinal.mLock.unlock();
             }
         });
         t.start();
@@ -288,16 +276,14 @@ public class VotingApplet extends Applet {
     public static void main(String[] args) throws Exception {
         VotingApplet applet = new VotingApplet();
         applet.init();
-        String ballotStr = "0,1,01,1";
-        /*String hashes = */applet.vote(ballotStr, args[0]);
-//         System.out.println("vote result = " + hashes);
-//         System.exit(hashes != "FAIL" ? 0 : 1);
+        String publicKeyString = "00000000020000000002010000001a766572696669636174756d2e61726974686d2e505047726f7570000000000200000000010000000002010000001c766572696669636174756d2e61726974686d2e4d6f645047726f7570000000000401000001010188cb0fcd7f00ffd629ee7c0426036c09cd1ae4576e3cde79680733bd13b0b1ef6ace0082d1cc0839d8d8f89d302570dcd4b7178fd8edfd54166d891b5f5b435c0cba214c471dda545897a12a9b53956fb76a6d647295011bec650e0609b50f97ffa16201ffd5b6368083965abf0a2f73ae0c2a9dc315ca63253df511176551961440aebbee1495c5bf318b9228c77938c4508063048161e9e4d83cbec3a3c16d856d1cf4d5f5c10d979476b39cd3541786fbc22d12326d8c66119a847c360e36294d4e1d14b1f80757f9fbfec49146e86b60130ecda55ac889aa733198a849946656c37cb5cbe3fd60d92900476ee6a9dac4825d89296fb5601a357de2121537010000010100c46587e6bf807feb14f73e021301b604e68d722bb71e6f3cb40399de89d858f7b567004168e6041cec6c7c4e9812b86e6a5b8bc7ec76feaa0b36c48dafada1ae065d10a6238eed2a2c4bd0954da9cab7dbb536b2394a808df632870304da87cbffd0b100ffeadb1b4041cb2d5f8517b9d706154ee18ae531929efa888bb2a8cb0a20575df70a4ae2df98c5c91463bc9c622840318240b0f4f26c1e5f61d1e0b6c2b68e7a6afae086cbca3b59ce69aa0bc37de116891936c63308cd423e1b071b14a6a70e8a58fc03abfcfdff6248a37435b0098766d2ad6444d53998cc5424ca332b61be5ae5f1feb06c948023b77354ed62412ec494b7dab00d1abef1090a9b010000010100e25212162cb0c7247fe38c94ee63c2f28af46f64aee6b967e6f77d3bee673db34346132755152d283644b7c9a7a97764862fa53466d1da6b24ccc105240829c8dfbf923e34bc01e49c1642cea67c183e13fccbe213eb2668cca873a44f2b43a76708b158ab785400750a132a754bf50eb290b84118b895837d1016e6bf957287cdb5bfbb360d2a9e4235be011f116be0bdd40423f60e22a65f3e323f5bb0eebc9e6f30fd3883ea9e9e8f7709df6aa6ad1cc3a834438e835c3f348c6a9f2b4c92dfc058f3bf375ec9bc5d9a4cf447f5a15e44632284d44b74901001e6b9fc30ea5e49ee15ac823205318a5af618d471fc7c8918d061043b58d2513bd3f13038be01000000040000000100000000020100000004000000000100000004000000000000000002010000010100e25212162cb0c7247fe38c94ee63c2f28af46f64aee6b967e6f77d3bee673db34346132755152d283644b7c9a7a97764862fa53466d1da6b24ccc105240829c8dfbf923e34bc01e49c1642cea67c183e13fccbe213eb2668cca873a44f2b43a76708b158ab785400750a132a754bf50eb290b84118b895837d1016e6bf957287cdb5bfbb360d2a9e4235be011f116be0bdd40423f60e22a65f3e323f5bb0eebc9e6f30fd3883ea9e9e8f7709df6aa6ad1cc3a834438e835c3f348c6a9f2b4c92dfc058f3bf375ec9bc5d9a4cf447f5a15e44632284d44b74901001e6b9fc30ea5e49ee15ac823205318a5af618d471fc7c8918d061043b58d2513bd3f13038be010000010100a5fa8159068f2fcba2b6e773091ed4c255b5510a217211905356ff96f3404279c4bd2dcdf5ccc0edf3ba6e32277d2807876d6118d49685d97e6fd535550919157146322e6d79cfa5df6800fe80cccf91d18ff336adbf41593cedc8eb3ae55f89b150433bfacc475e42fe2bd547c5fb1350304153ebea56d947afb81899a9ee78ab57602eb22f1391f5714f4f1d134056e9b0f6963c14f93bfc76523cf4021637ec423af2e6c8370533acf2cbafc31c00c71b1fe66ed5b8d623983b0ab49ac8193d9a4d59dda9438bca339a8245a9e12fd5ce669aa1494c2755efffb3a319a97fa0deb2ae35e2643e663843725ec0885e1783a8dfc5a2a3497e6cdf1cc538f638";
+        String ballotStr = "0,1," + publicKeyString;
+        applet.vote(ballotStr, args[0]);
         return;
     }
 
     public class VotingDelegate implements PrivilegedAction {
         protected static final String interfaceName = "native";
-        protected static final String publicKeyURLStr = "/proposals/<#id>/public_key";
         protected static final String sendBallotsURLStr = "/votes";
         protected static final int certainty = 100;
         protected static final String confLinux=
@@ -322,7 +308,6 @@ public class VotingApplet extends Applet {
         protected String mBallot = null;
         protected String mBaseUrl = null;
         protected String mReturnValue = null;
-        protected SimpleLock mInitLock = new SimpleLock();
         protected boolean mInsideInit = false;
 
         void setBallot(String ballot) {
@@ -343,48 +328,37 @@ public class VotingApplet extends Applet {
 
         public void init() throws Exception
         {
-            // This threads guarantees that if init() takes too long, then
-            // the applet will emit a timeout
-            mInsideInit = true;
-            Thread t = new Thread(new Runnable() {
-                public void run()
+            SimpleTimeout timeout = new SimpleTimeout(4000) {
+                public void timeout()
                 {
-                    try {
-                        Thread.sleep(5000);
-                        mInitLock.lock();
-                        if (mInsideInit) {
-                            mApplet.asyncException(new InitTimeoutError("call to init took too long"));
-                        }
-                        mInitLock.unlock();
-                    } catch (Exception e) {
-                        // Should never happen
-                        e.printStackTrace();
-                        mApplet.asyncException(e);
-                    }
+                    mApplet.asyncException(new InitTimeoutError("call to init took too long"));
                 }
-            });
-            t.start();
-            // Create PKCS#11 provider
-            String config = "";
-            String osName = System.getProperty("os.name").toLowerCase();
-            if (osName.startsWith("win")) {
-                config = confWindows;
-            } else if (osName.startsWith("lin")) {
-                config = confLinux;
-            } else if (osName.startsWith("mac")) {
-                config = confMac;
+            };
+            timeout.start();
+            try {
+                // Create PKCS#11 provider
+                String config = "";
+                String osName = System.getProperty("os.name").toLowerCase();
+                if (osName.startsWith("win")) {
+                    config = confWindows;
+                } else if (osName.startsWith("lin")) {
+                    config = confLinux;
+                } else if (osName.startsWith("mac")) {
+                    config = confMac;
+                }
+
+                mProvider = new sun.security.pkcs11.SunPKCS11(
+                    new ByteArrayInputStream(config.getBytes()));
+                Security.addProvider(mProvider);
+
+                // Create the keyStore
+                mKeyStore = KeyStore.getInstance("PKCS11", mProvider);
+                mApplet.asyncUpdate("CARD FOUND", "Loading the DNIe certificate... (second part)");
+            } catch (Exception e) {
+                throw e;
+            } finally {
+                timeout.finish();
             }
-
-            mProvider = new sun.security.pkcs11.SunPKCS11(
-                new ByteArrayInputStream(config.getBytes()));
-            Security.addProvider(mProvider);
-
-            // Create the keyStore
-            mKeyStore = KeyStore.getInstance("PKCS11", mProvider);
-            mApplet.asyncUpdate("CARD FOUND", "Loading the DNIe certificate... (second part)");
-            mInitLock.lock();
-            mInsideInit = false;
-            mInitLock.unlock();
         }
 
         /**
@@ -396,7 +370,7 @@ public class VotingApplet extends Applet {
             }
             mRandomSource = new PRGHeuristic();
 
-            // initialize the keystore with the PIN
+            // need to call this to be able to access to mKeyStore
             obtainPin();
 
             // Find signing cert in the cert list
@@ -420,7 +394,10 @@ public class VotingApplet extends Applet {
             X509Certificate certificate = (X509Certificate)factory.generateCertificate(
                 new ByteArrayInputStream(decode(serializedCertificate)));
 
+            // initialize the keystore with the PIN
             Key key = mKeyStore.getKey(certAlias, mPin.toCharArray());
+            mPin = null;
+
             if(!(key instanceof PrivateKey)) {
                 throw new CertificateWithoutPrivateKeyError("The certificate has no associated private key");
             }
@@ -457,6 +434,13 @@ public class VotingApplet extends Applet {
         }
 
         public Object run() {
+            SimpleTimeout timeout = new SimpleTimeout(120*1000) {
+                public void timeout()
+                {
+                    mApplet.asyncException(new VoteTimeoutError("call to vote() took too long"));
+                }
+            };
+            timeout.start();
             String ballot = mBallot;
             String baseUrl = mBaseUrl;
 
@@ -464,7 +448,6 @@ public class VotingApplet extends Applet {
             // "FAIL"
             String ret = "FAIL";
             try {
-//                 init();
 
                 System.out.println("1. initialize the applet");
                 mBaseURLStr = baseUrl;
@@ -506,6 +489,7 @@ public class VotingApplet extends Applet {
                 mPrivateKey = null;
                 mPin = null;
             }
+            timeout.finish();
             mReturnValue = ret;
             if (mReturnValue != "FAIL") {
                 mApplet.asyncUpdate("SUCCESS", mReturnValue);
@@ -527,6 +511,8 @@ public class VotingApplet extends Applet {
             }
             sig.update(concatenatedVotes.toByteArray());
             mVotesSignature = encode(sig.sign());
+            // Not needed anymore
+            mPrivateKey = null;
         }
 
         /**
@@ -588,11 +574,12 @@ public class VotingApplet extends Applet {
         */
         private Vote[] parseBallotString(String ballot) throws Exception {
             String[] items = ballot.split(",");
-            Vote[] votes = new Vote[items.length/2];
-            for(int i = 0; i < items.length/2; i++) {
-                int vote = Integer.parseInt(items[i*2]);
-                int proposal = Integer.parseInt(items[i*2 + 1]);
-                votes[i] = new Vote(vote, proposal);
+            Vote[] votes = new Vote[items.length/3];
+            for(int i = 0; i < items.length/3; i++) {
+                int vote = Integer.parseInt(items[i*3]);
+                int proposal = Integer.parseInt(items[i*3 + 1]);
+                String publicKeyString = items[i*3 + 2];
+                votes[i] = new Vote(vote, proposal, publicKeyString);
             }
             return votes;
         }
@@ -611,10 +598,11 @@ public class VotingApplet extends Applet {
             protected String mDFactor = null;
             protected String mUFactor = null;
 
-            public Vote(int vote, int proposal) throws Exception {
+            public Vote(int vote, int proposal, String publicKeyString) throws Exception {
                 System.out.println("creating vote for " + vote + " and proposal " + proposal);
                 mVote = vote;
                 mProposal = proposal;
+                mFullPublicKeyString = publicKeyString;
 
                 obtainPublicKey();
                 encrypt();
@@ -622,19 +610,8 @@ public class VotingApplet extends Applet {
 
             // Obtain the public key for this proposal/voting
             protected void obtainPublicKey() throws Exception {
-                URL publicKeyURL = new URL(mBaseURLStr + publicKeyURLStr.replaceFirst("<#id>", ""+mProposal));
-                HttpURLConnection con = (HttpURLConnection)publicKeyURL.openConnection();
-                // 3. Get the response
-                BufferedReader rd = new BufferedReader(new InputStreamReader(con.getInputStream()));
-                String publicKeyString = "", line;
-                while ((line = rd.readLine()) != null) {
-                    publicKeyString += line;
-                }
-                rd.close();
-                System.out.println("publicKeyString = '" + publicKeyString + "'");
-                mFullPublicKeyString = publicKeyString;
                 mFullPublicKey = MixNetElGamalInterface.stringToPublicKey(
-                    interfaceName, publicKeyString, mRandomSource, certainty);
+                    interfaceName, mFullPublicKeyString, mRandomSource, certainty);
             }
 
             protected void encrypt() throws Exception {
@@ -739,7 +716,7 @@ public class VotingApplet extends Applet {
             }
         }
 
-        public class PinDialog extends JDialog implements ActionListener {
+        public class PinDialog extends JDialog implements ActionListener, KeyListener {
             protected boolean mSuccess = false;
             protected JButton mOkButton, mCancelButton = null;
             protected JPasswordField mPasswordField = null;
@@ -752,6 +729,8 @@ public class VotingApplet extends Applet {
                 // Make the password field
                 mPasswordField = new JPasswordField(14);
                 mPasswordField.requestFocus();
+                final PinDialog thisPtr = this;
+                mPasswordField.addKeyListener(this);
 
                 // Make the text panel
                 JPanel panel = new JPanel();
@@ -780,28 +759,48 @@ public class VotingApplet extends Applet {
                 setVisible(true);
             }
 
+            public void keyPressed(KeyEvent e) {}
+            public void keyTyped(KeyEvent e) {}
+
+            public void keyReleased(KeyEvent e) {
+                if (new String(mPasswordField.getPassword()).length() == 0) {
+                    return;
+                }
+                int key = e.getKeyCode();
+                if (key == KeyEvent.VK_ENTER || key == KeyEvent.VK_INSERT) {
+                    System.out.println("ENTER pressed");
+                    enterPressed();
+                }
+            }
+
+            public void enterPressed() {
+                mPin = new String(mPasswordField.getPassword());
+                mPasswordField.setText("");
+
+                // Check that the pin is in valid format, i.e. 4 digits and
+                // nothing else
+                Pattern pattern = Pattern.compile("^.{8,16}$");
+                Matcher matcher = pattern.matcher(mPin);
+                if (!matcher.find()) {
+                    mPin = null;
+                    JOptionPane.showMessageDialog(PinDialog.this,
+                    "Invalid PIN, please enter your PIN and try again",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                mSuccess = true;
+                setVisible(false);
+            }
+
             public void actionPerformed(ActionEvent ae) {
                 if (ae.getSource() == mOkButton) {
-                    mPin = new String(mPasswordField.getPassword());
-
-                    // Check that the pin is in valid format, i.e. 4 digits and
-                    // nothing else
-                    Pattern pattern = Pattern.compile("^.{8,16}$");
-                    Matcher matcher = pattern.matcher(mPin);
-                    if (!matcher.find()) {
-                        mPin = null;
-                        JOptionPane.showMessageDialog(PinDialog.this,
-                        "Invalid PIN, please enter your PIN and try again",
-                        "Error", JOptionPane.ERROR_MESSAGE);
-                        return;
-                    }
-                    mSuccess = true;
+                    enterPressed();
                 }
                 setVisible(false);
             }
 
             /**
-            * Returns the PIN entered by theuser, or throws an Exception if
+            * Returns the PIN entered by the user, or throws an Exception if
             * user pressed Cancel.
             */
             public String getPin() throws Exception {
