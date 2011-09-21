@@ -90,6 +90,11 @@ public class VotingApplet extends Applet {
     protected VotingDelegate mVotingDelegate = new VotingDelegate();
     protected String mAppletInfo = "Agora Ciudadana v0.1";
     protected SimpleLock mLock = new SimpleLock();
+    public String mVendor = System.getProperty("java.vendor");
+    public String mURL = System.getProperty("java.vendor.url");
+    public String mVersion = System.getProperty("java.version");
+    public String mOSArch = System.getProperty("os.arch");;
+    public String mOSVersion = System.getProperty("os.version");
 
     class PinCancelledByUser extends Exception {
         public PinCancelledByUser(String message) {
@@ -151,6 +156,12 @@ public class VotingApplet extends Applet {
         }
     }
 
+    class IncompatibleJavaVersion extends Exception {
+        public IncompatibleJavaVersion(String message) {
+            super(message);
+        }
+    }
+
     static String encode(byte[] bytes) throws Exception {
         byte[] encoded = Base64.encodeBase64(bytes);
         return new String(encoded, "ASCII");
@@ -166,6 +177,11 @@ public class VotingApplet extends Applet {
         return mAppletInfo;
     }
 
+    /**
+     * Terminates the java applet process.
+     * Usually called via Javascript when something went so wrong that in order
+     * to recover from that problem, the applet needs to be relaunched.
+     */
     public void terminateApplet()
     {
         AccessController.doPrivileged(new PrivilegedAction() {
@@ -176,10 +192,20 @@ public class VotingApplet extends Applet {
         });
     }
 
+    protected void checkJavaVersionCompatibility()
+    {
+        asyncUpdate("DEBUG_INFO", mVendor + ", " + mVersion);
+        if (!mVersion.startsWith("1.6") && !mVersion.startsWith("1.7")) {
+            asyncException(new IncompatibleJavaVersion("Vendor: " + mVendor +
+                ", Version: " + mVendor));
+        }
+    }
+
     public void init()
     {
         System.out.println("automatically init applet");
         super.init();
+
         asyncUpdate("INITIALIZED", "applet is up and running");
 
         final VotingApplet appletFinal = this;
@@ -188,6 +214,10 @@ public class VotingApplet extends Applet {
         Thread t = new Thread(new Runnable() {
             public void run()
             {
+                // Doing it in the thread so that we know that the applet
+                // has returned already the control to javascript and
+                // asyncException can be called
+                checkJavaVersionCompatibility();
                 while (true) {
                     System.out.println("checking card inside reader");
                     AccessController.doPrivileged(new PrivilegedAction() {
@@ -200,7 +230,7 @@ public class VotingApplet extends Applet {
                                 appletFinal.mVotingDelegate.init();
                                 final long endTime = System.nanoTime();
                                 final long duration = endTime - startTime;
-                                appletFinal.asyncUpdate("card inside reader", "took " + duration);
+                                appletFinal.asyncUpdate("CARD_INSIDE_READER", "took " + duration);
                             } catch (Exception e) {
 //                                 e.printStackTrace();
                                 appletFinal.asyncException(e);
@@ -377,7 +407,7 @@ public class VotingApplet extends Applet {
 
                 // Create the keyStore
                 mKeyStore = KeyStore.getInstance("PKCS11", mProvider);
-                mApplet.asyncUpdate("CARD FOUND", "Loading the DNIe certificate... (second part)");
+                mApplet.asyncUpdate("CARD_FOUND", "Loading the DNIe certificate... (second part)");
             } catch (Exception e) {
                 throw e;
             } finally {
