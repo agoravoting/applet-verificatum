@@ -596,7 +596,7 @@ public class VotingApplet extends Applet {
             };
             timeout.start();
             try {
-                Signature sig = Signature.getInstance("SHA256withRSA");
+                Signature sig = Signature.getInstance("SHA256withRSA", mProvider);
                 sig.initSign(mPrivateKey);
 
                 ByteArrayOutputStream concatenatedVotes = new ByteArrayOutputStream();
