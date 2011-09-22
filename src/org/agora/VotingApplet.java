@@ -495,6 +495,8 @@ public class VotingApplet extends Applet {
                 } catch (IOException e) {
                     timeout.finish();
                     throw e;
+                } finally {
+                    timeout.finish();
                 }
 
                 timeout = new SimpleTimeout(60*1000) {
@@ -517,6 +519,8 @@ public class VotingApplet extends Applet {
                     JOptionPane.showMessageDialog(VotingApplet.this,
                         "Incorrect PIN, please enter your PIN and try again",
                         "Error", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    timeout.finish();
                 }
             }
 
