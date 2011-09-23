@@ -588,7 +588,7 @@ public class VotingApplet extends Applet {
         * the dnie. This way the user is only asked once to sign the votes.
         */
         protected void sign(Vote []votes) throws Exception {
-            SimpleTimeout timeout = new SimpleTimeout(60*1000) {
+            SimpleTimeout timeout = new SimpleTimeout(90*1000) {
                 public void timeout()
                 {
                     mApplet.asyncException(new SignatureTimeoutError("call to sign() took too long"));

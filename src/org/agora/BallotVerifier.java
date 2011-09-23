@@ -183,7 +183,6 @@ public class BallotVerifier {
                 
                 String dateStr = dateF.format(date);
                 ageCorrect = date.before(cal.getTime());
-                System.out.println("BINGO " + ageCorrect + "date of birth = " + dateStr + "\n\n");
             }
         }
         if (!ageCorrect) {
