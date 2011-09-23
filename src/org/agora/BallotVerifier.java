@@ -204,9 +204,8 @@ public class BallotVerifier {
     }
 
     /**
-     * Loads the vote string into PGroupElements. TODO: In the future,here we 
-     * will verify if the vote is valid using a random oracle ZKP of knowledge
-     * provided by the voter.
+     * Loads the vote string into PGroupElements and verify if the vote is valid
+     * using a random oracle ZKP of knowledge provided by the voter.
      */
     protected void checkVotesEncryption(String[] votes,
         String[] propossalPublicKeys, String[] propossalIds,
