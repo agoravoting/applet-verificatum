@@ -728,7 +728,8 @@ public class VotingApplet extends Applet {
             }
 
             protected void encrypt() throws Exception {
-                String plaintext = "" + mVote;
+                String plaintext = Integer.toString(mVote);
+
                 // Recover key from input
                 PGroupElement basicPublicKey =
                     ((PPGroupElement)mFullPublicKey).project(0);
