@@ -338,7 +338,8 @@ public class VotingApplet extends Applet {
 
     public class VotingDelegate implements PrivilegedAction {
         protected static final String interfaceName = "native";
-        protected static final String sendBallotsURLStr = "/votes";
+        protected static final String publicKeyURLStr = "/proposals/<#id>/public_key";
+        protected static final String sendBallotsURLStr = "/proposals/<#id>/votes";
         protected static final int certainty = 100;
         protected static final String confLinux=
             "name=OpenSC-OpenDNIe\nlibrary=/usr/lib/opensc-pkcs11.so\n";
