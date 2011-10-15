@@ -712,7 +712,6 @@ public class VotingApplet extends Applet {
             protected String mUFactor = null;
 
             public Vote(int vote, int proposal, String publicKeyString) throws Exception {
-                System.out.println("creating vote for " + vote + " and proposal " + proposal);
                 mVote = vote;
                 mProposal = proposal;
                 mFullPublicKeyString = publicKeyString;
